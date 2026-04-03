@@ -1,44 +1,62 @@
 ```
-Internet Engineering Task Force (IETF)            S. Sosnowski
-Request for Comments: NNNN                         DatanoiseTV
-Category: Standards Track                        4 April 2026
+Internet Engineering Task Force (IETF)        S. Sosnowski
+Request for Comments: NNNN                     DatanoiseTV
+Category: Standards Track                    April 3, 2026
 ISSN: 2070-1721
 
 
-   AudioBus: Multiplexed Audio and Control Transport
-          over Ethernet and LVDS Links
+    AudioBus: Multiplexed Audio and Control Transport
+           over Ethernet and LVDS Links
 
 Abstract
 
-   This document specifies AudioBus, a protocol for
-   deterministic, low-latency transport of multi-channel
-   digital audio and control data over IEEE 802.3 Ethernet
-   networks and Low-Voltage Differential Signaling serial
-   links.  The protocol supports up to 64 channels of
-   32-bit PCM audio at sample rates up to 96 kHz,
+   This document specifies AudioBus, a deterministic
+   protocol for low-latency transport of multi-channel
+   digital audio and control data over IEEE 802.3
+   Ethernet networks and Low-Voltage Differential
+   Signaling (LVDS) serial links.
+
+   The protocol supports up to 64 channels of 32-bit
+   linear PCM audio at sample rates up to 96 kHz,
    multiplexed with GPIO, MIDI, SPI, and I2C control
    tunnels.  Clock synchronization is achieved using a
-   profile of IEEE 1588 Precision Time Protocol with
-   hardware timestamping, providing sub-microsecond
-   accuracy across all nodes.  The protocol requires no
-   manual configuration; nodes discover each other and
-   elect a clock reference automatically.
+   constrained profile of IEEE 1588 Precision Time
+   Protocol with mandatory hardware timestamping,
+   providing sub-microsecond accuracy across all
+   participating nodes.  The protocol is fully
+   self-configuring: nodes discover one another and
+   elect a clock reference automatically using the Best
+   Master Clock algorithm.
+
+   AudioBus addresses two complementary deployment
+   scenarios.  In Ethernet mode, nodes attach to
+   commodity IEEE 802.3 switches in star or tree
+   topologies and communicate via Layer 2 multicast
+   using a dedicated EtherType.  In LVDS mode, nodes
+   form a daisy-chain over a single twisted pair using
+   8b10b-coded half-duplex TDM framing with a
+   master/slave relationship.
+
+   An implementation MAY support one or both transport
+   modes.  A bridge node MAY interconnect an Ethernet
+   segment with an LVDS daisy chain.
 
 Status of This Memo
 
    This is an Internet Standards Track document.
 
-   This document is a product of the Internet Engineering
-   Task Force (IETF).  It represents the consensus of the
-   IETF community.  It has received public review and has
-   been approved for publication by the Internet
-   Engineering Steering Group (IESG).  Further information
-   on Internet Standards is available in Section 2 of
-   RFC 7841.
+   This document is a product of the Internet
+   Engineering Task Force (IETF).  It represents the
+   consensus of the IETF community.  It has received
+   public review and has been approved for publication
+   by the Internet Engineering Steering Group (IESG).
+   Further information on Internet Standards is
+   available in Section 2 of RFC 7841.
 
-   Information about the current status of this document,
-   any errata, and how to provide feedback on it may be
-   obtained at https://www.rfc-editor.org/info/rfcNNNN.
+   Information about the current status of this
+   document, any errata, and how to provide feedback
+   on it may be obtained at
+   https://www.rfc-editor.org/info/rfcNNNN.
 
 Copyright Notice
 
@@ -48,128 +66,90 @@ Copyright Notice
 
    This document is subject to BCP 78 and the IETF
    Trust's Legal Provisions Relating to IETF Documents
-   (https://trustee.ietf.org/license-info) in effect on
-   the date of publication of this document.  Please
-   review these documents carefully, as they describe
-   your rights and restrictions with respect to this
-   document.  Code Components extracted from this
-   document must include Revised BSD License text as
-   described in Section 4.e of the Trust Legal Provisions
-   and are provided without warranty as described in the
-   Revised BSD License.
+   (https://trustee.ietf.org/license-info) in effect
+   on the date of publication of this document.
+   Please review these documents carefully, as they
+   describe your rights and restrictions with respect
+   to this document.  Code Components extracted from
+   this document must include Revised BSD License text
+   as described in Section 4.e of the Trust Legal
+   Provisions and are provided without warranty as
+   described in the Revised BSD License.
+
 
 Table of Contents
 
-   1.  Introduction
-       1.1.  Motivation
-       1.2.  Design Goals
-       1.3.  Scope
-   2.  Terminology and Conventions
-       2.1.  Requirements Language
-       2.2.  Definitions
-   3.  Protocol Architecture
-       3.1.  Layer Model
-       3.2.  Transport Modes
-       3.3.  Node Roles
-       3.4.  Stream Model
-   4.  Common Packet Format
-       4.1.  Common Header
-       4.2.  Packet Type Registry
-       4.3.  Byte Ordering
-   5.  Ethernet Transport
-       5.1.  Frame Encapsulation
-       5.2.  EtherType
-       5.3.  Multicast Addressing
-       5.4.  VLAN Tagging
-       5.5.  Quality of Service
-       5.6.  Coexistence with IP Traffic
-   6.  LVDS Serial Transport
-       6.1.  Physical Layer
-       6.2.  8b10b Line Coding
-       6.3.  TDM Frame Structure
-       6.4.  Frame Header
-       6.5.  Slot Map
-       6.6.  Half-Duplex Operation
-       6.7.  Daisy-Chain Forwarding
-   7.  Clock Synchronization
-       7.1.  PTP Profile
-       7.2.  Grandmaster Election
-       7.3.  Sync Message
-       7.4.  Follow_Up Message
-       7.5.  Delay_Req Message
-       7.6.  Delay_Resp Message
-       7.7.  Media Clock Recovery
-       7.8.  Hardware Timestamping
-   8.  Node Discovery
-       8.1.  Beacon Format
-       8.2.  Beacon Timing
-       8.3.  Node Identification
-       8.4.  Hardware Types
-       8.5.  Node Expiry
-   9.  Stream Management
-       9.1.  Stream Announcement
-       9.2.  Channel Labels
-       9.3.  Stream Subscription
-       9.4.  Dynamic Channel Count
-       9.5.  Stream Teardown
-   10. Audio Data Transport
-       10.1. Audio Packet Format
-       10.2. Sample Encoding
-       10.3. Sample Interleaving
-       10.4. Presentation Timestamps
-       10.5. Packet Interval
-       10.6. Sequence Numbering
-       10.7. Playout Buffer
-       10.8. Packet Loss Concealment
-   11. Control Tunneling
-       11.1. Tunnel Packet Format
-       11.2. GPIO Tunnel
-       11.3. MIDI Tunnel
-       11.4. SPI Tunnel
-       11.5. I2C Tunnel
-       11.6. Sideband Channel
-   12. Metadata
-       12.1. Metadata Packet Format
-       12.2. Metadata Entry Encoding
-       12.3. Standard Metadata Keys
-   13. Latency Measurement
-       13.1. Ping Message
-       13.2. Pong Message
-       13.3. Round-Trip Computation
-       13.4. Jitter Estimation
-   14. Error Handling
-       14.1. Unknown Packet Types
-       14.2. Version Mismatch
-       14.3. CRC Failure
-       14.4. Sequence Gaps
-       14.5. Late Packets
-       14.6. Grandmaster Loss
-   15. Extensibility and Versioning
-       15.1. Version Field
-       15.2. Reserved Fields
-       15.3. Private-Use Ranges
-   16. Security Considerations
-       16.1. Threat Model
-       16.2. Confidentiality
-       16.3. Integrity
-       16.4. Availability
-       16.5. Authentication
-       16.6. Mitigations
-   17. IANA Considerations
-       17.1. EtherType Assignment
-       17.2. Multicast OUI Assignment
-       17.3. AudioBus Packet Type Registry
-       17.4. AudioBus Tunnel Type Registry
-       17.5. AudioBus Hardware Type Registry
-       17.6. AudioBus Metadata Key Registry
-   18. References
-       18.1. Normative References
-       18.2. Informative References
-   Appendix A.  Channel Capacity Tables
-   Appendix B.  Recommended Hardware
-   Appendix C.  Example Message Exchange
-   Acknowledgements
-   Authors' Addresses
+   1.  Introduction  . . . . . . . . . . . . . . . .   4
+       1.1.  Motivation  . . . . . . . . . . . . . .   4
+       1.2.  Design Goals  . . . . . . . . . . . . .   5
+       1.3.  Scope . . . . . . . . . . . . . . . . .   7
+       1.4.  Relationship to Other Protocols . . . .   7
+       1.5.  Document Organization . . . . . . . . .   8
+   2.  Terminology and Conventions . . . . . . . . .   9
+       2.1.  Requirements Language . . . . . . . . .   9
+       2.2.  Definitions . . . . . . . . . . . . . .   9
+       2.3.  Notation  . . . . . . . . . . . . . . .  12
+   3.  Protocol Architecture . . . . . . . . . . . .  13
+       3.1.  Layer Model . . . . . . . . . . . . . .  13
+       3.2.  Transport Modes . . . . . . . . . . . .  15
+       3.3.  Node Roles  . . . . . . . . . . . . . .  16
+       3.4.  Stream Model  . . . . . . . . . . . . .  17
+       3.5.  Node Lifecycle State Machine  . . . . .  18
+       3.6.  Timing Model . . . . . . . . . . . . .  20
+   4.  Common Packet Format  . . . . . . . . . . . .  22
+       4.1.  Common Header . . . . . . . . . . . . .  22
+       4.2.  ABNF for Common Header  . . . . . . . .  25
+       4.3.  Packet Type Registry  . . . . . . . . .  27
+       4.4.  Byte Ordering . . . . . . . . . . . . .  28
+       4.5.  Maximum Packet Size . . . . . . . . . .  28
+       4.6.  Packet Integrity  . . . . . . . . . . .  29
+   5.  Ethernet Transport  . . . . . . . . . . . . .  30
+       5.1.  Frame Encapsulation . . . . . . . . . .  30
+       5.2.  EtherType . . . . . . . . . . . . . . .  32
+       5.3.  Multicast Addressing  . . . . . . . . .  33
+       5.4.  VLAN Tagging  . . . . . . . . . . . . .  35
+       5.5.  Quality of Service  . . . . . . . . . .  36
+       5.6.  Coexistence with IP Traffic . . . . . .  37
+       5.7.  Bandwidth Budget  . . . . . . . . . . .  38
+       5.8.  Switch Requirements . . . . . . . . . .  39
+   6.  LVDS Serial Transport . . . . . . . . . . . .  41
+       6.1.  Physical Layer  . . . . . . . . . . . .  41
+       6.2.  8b10b Line Coding . . . . . . . . . . .  43
+       6.3.  TDM Frame Structure . . . . . . . . . .  45
+       6.4.  Frame Header  . . . . . . . . . . . . .  47
+       6.5.  Slot Map  . . . . . . . . . . . . . . .  50
+       6.6.  Half-Duplex Operation . . . . . . . . .  53
+       6.7.  Daisy-Chain Forwarding  . . . . . . . .  55
+       6.8.  LVDS Node State Machine . . . . . . . .  57
+       6.9.  Error Detection . . . . . . . . . . . .  59
+   7.  Clock Synchronization . . . . . . . . . . . .  60
+       7.1.  PTP Profile . . . . . . . . . . . . . .  60
+       7.2.  Grandmaster Election  . . . . . . . . .  62
+       7.3.  Sync Message  . . . . . . . . . . . . .  65
+       7.4.  Follow_Up Message . . . . . . . . . . .  67
+       7.5.  Delay_Req Message . . . . . . . . . . .  69
+       7.6.  Delay_Resp Message  . . . . . . . . . .  71
+       7.7.  Offset and Delay Computation  . . . . .  73
+       7.8.  Clock Servo . . . . . . . . . . . . . .  75
+       7.9.  Media Clock Recovery  . . . . . . . . .  77
+       7.10. Hardware Timestamping . . . . . . . . .  78
+       7.11. LVDS Clock Synchronization  . . . . . .  80
+   8.  Node Discovery  . . . . . . . . . . . . . . .
+   9.  Stream Management . . . . . . . . . . . . . .
+   10. Audio Data Transport  . . . . . . . . . . . .
+   11. Control Tunneling . . . . . . . . . . . . . .
+   12. Metadata  . . . . . . . . . . . . . . . . . .
+   13. Latency Measurement . . . . . . . . . . . . .
+   14. Error Handling  . . . . . . . . . . . . . . .
+   15. Extensibility and Versioning  . . . . . . . .
+   16. Security Considerations . . . . . . . . . . .
+   17. IANA Considerations . . . . . . . . . . . . .
+   18. References  . . . . . . . . . . . . . . . . .
+   Appendix A.  Channel Capacity Tables  . . . . . .
+   Appendix B.  Recommended Hardware . . . . . . . .
+   Appendix C.  Example Message Exchange . . . . . .
+   Acknowledgements  . . . . . . . . . . . . . . . .
+   Authors' Addresses  . . . . . . . . . . . . . . .
 
 
 1.  Introduction
@@ -177,200 +157,926 @@ Table of Contents
 1.1.  Motivation
 
    Professional and consumer audio systems require
-   transport of multiple channels of high-resolution
-   digital audio alongside control data over simple
-   physical interconnections.  Existing solutions are
-   proprietary, expensive, limited in channel count, or
-   require specialized network infrastructure.
+   the transport of multiple channels of high-
+   resolution digital audio alongside control data
+   over simple, low-cost physical interconnections.
+   Existing solutions in this space -- including
+   Dante, AVB/Milan, AES67, and proprietary serial
+   buses -- suffer from one or more of the following
+   limitations:
 
-   AudioBus addresses these limitations by defining an
-   open protocol that operates over two complementary
-   transports: standard IEEE 802.3 Ethernet using
-   commodity switches, and dedicated LVDS serial links
-   over a single twisted pair for cost-optimized,
-   ultra-low-latency daisy-chain topologies.
+   (a) Reliance on proprietary licensing, which
+       restricts adoption and increases per-unit
+       cost.
+
+   (b) Dependence on specialized network
+       infrastructure such as AVB-capable switches,
+       which limits deployment flexibility.
+
+   (c) Inability to operate over low-cost serial
+       links, precluding use in embedded, battery-
+       powered, or space-constrained designs.
+
+   (d) Rigid channel counts and sample rates that
+       cannot be changed at runtime without tearing
+       down and re-establishing all streams.
+
+   (e) Complex configuration requirements that
+       demand manual setup by trained personnel.
+
+   AudioBus addresses these limitations by defining
+   an open protocol that operates over two
+   complementary transports: standard IEEE 802.3
+   Ethernet using commodity switches, and dedicated
+   LVDS serial links over a single twisted pair for
+   cost-optimized, ultra-low-latency daisy-chain
+   topologies.
+
+   The protocol is designed for full self-
+   configuration.  Nodes discover one another via
+   periodic beacons, elect a clock reference
+   automatically, announce and subscribe to audio
+   streams without user intervention, and adapt
+   dynamically to changes in network topology and
+   stream configuration.
 
 1.2.  Design Goals
 
-   The protocol satisfies the following requirements:
+   The AudioBus protocol satisfies the following
+   requirements, ordered by priority:
 
-   G1.  Deterministic latency: fixed, predictable
-        end-to-end delay with no data-dependent
-        variation.
+   G1.  Deterministic latency.
 
-   G2.  Zero jitter: audio playout synchronized to a
-        common time base across all nodes, independent
-        of network topology.
+        The end-to-end delay from talker sample
+        capture to listener sample playout MUST be
+        fixed and predictable for a given network
+        topology and configuration.  There MUST be
+        no data-dependent variation in latency.  In
+        Ethernet mode, the worst-case one-way latency
+        through a single switch is bounded by:
 
-   G3.  Plug-and-play: no manual configuration.  Nodes
-        discover each other, negotiate capabilities,
-        and begin streaming automatically.
+           L_eth = T_pkt + T_switch + T_buf
 
-   G4.  Dynamic: channel counts, sample rates, and
-        stream configurations may change at runtime.
+        where T_pkt is the packetization delay
+        (packet interval), T_switch is the switch
+        fabric delay (typically 3-10 microseconds
+        for a store-and-forward switch), and T_buf
+        is the playout buffer depth.
 
-   G5.  Coexistence: Ethernet transport MUST NOT
-        interfere with IP traffic on the same network.
+        In LVDS mode, the one-way latency is:
 
-   G6.  Simplicity: implementable on microcontrollers
-        with 400 MHz clock and 512 KB SRAM.
+           L_lvds = H * T_frame
 
-   G7.  Low cost: all required components are commodity
-        parts available from multiple vendors.
+        where H is the number of hops and T_frame
+        is the frame period (1/Fs).
+
+   G2.  Zero-jitter playout.
+
+        Audio playout MUST be synchronized to a
+        common time base across all nodes,
+        independent of network topology and packet
+        arrival jitter.  All listeners receiving the
+        same stream MUST begin playout of each audio
+        frame at the same PTP-referenced instant,
+        with sample-level accuracy.
+
+   G3.  Plug-and-play operation.
+
+        No manual configuration is required.  Nodes
+        MUST discover each other, negotiate
+        capabilities, elect a clock reference, and
+        begin streaming automatically.  Adding or
+        removing a node MUST NOT disrupt active
+        streams on other nodes, except for the
+        transient loss of any stream originated by a
+        departing node.
+
+   G4.  Dynamic reconfiguration.
+
+        Channel counts MAY change at runtime without
+        stream teardown.  Sample rates and bit depths
+        require stream deletion and re-creation.
+        Nodes MAY join or leave at any time.  The
+        protocol MUST converge to a stable state
+        within a bounded time after any topology
+        change.  The convergence time MUST NOT exceed
+        4 seconds (the sum of the node expiry timeout
+        of 3 seconds plus one beacon interval of
+        1 second).
+
+   G5.  Coexistence.
+
+        In Ethernet mode, AudioBus traffic MUST NOT
+        interfere with IP protocol stacks on the
+        same interface.  AudioBus and IP traffic MUST
+        be able to share the same physical port and
+        switch infrastructure.
+
+   G6.  Implementation simplicity.
+
+        The protocol MUST be implementable on
+        microcontrollers with 400 MHz clock and
+        512 KB SRAM.  The common header is 12 octets.
+        Packet parsing requires no variable-length
+        fields before the payload.  No floating-point
+        arithmetic is required for any protocol
+        operation.
+
+   G7.  Low cost.
+
+        All required components (Ethernet PHY, LVDS
+        transceiver, crystal oscillator) are commodity
+        parts available from multiple vendors at
+        consumer price points.
+
+   G8.  Extensibility.
+
+        The packet type space accommodates future
+        extensions.  Reserved fields and a version
+        number support backward-compatible evolution.
+        A private-use range (0x50-0x7F) allows
+        vendor-specific extensions without
+        coordination.
 
 1.3.  Scope
 
-   This specification defines wire formats, transport
-   encapsulation, clock synchronization, discovery,
-   stream management, audio packetization, control
-   tunneling, metadata distribution, and latency
-   measurement.
+   This specification defines:
 
-   This specification does not define hardware
-   implementation details, application-layer processing
-   logic, content protection, or wireless transports.
+   -  Wire formats for all packet types.
+   -  Transport encapsulation for IEEE 802.3
+      Ethernet and LVDS serial links.
+   -  A constrained PTP profile for clock
+      synchronization, including grandmaster
+      election, message formats, and servo
+      requirements.
+   -  Node discovery via periodic beacons.
+   -  Stream management: announcement, subscription,
+      dynamic channel changes, and teardown.
+   -  Audio packetization with presentation
+      timestamps and sequence numbering.
+   -  Control tunneling for GPIO, MIDI, SPI, and
+      I2C.
+   -  Metadata distribution.
+   -  Latency measurement via ping/pong.
+   -  Error handling and recovery procedures.
+   -  Extensibility mechanisms.
+
+   This specification does not define:
+
+   -  Hardware implementation details beyond the
+      minimum requirements for interoperability.
+   -  Application-layer processing logic (e.g.,
+      mixing, effects, routing matrices).
+   -  Digital rights management or content
+      protection.
+   -  Wireless transports.
+   -  Bridging algorithms between Ethernet and LVDS
+      segments (the bridge behavior is described at
+      the protocol level, but bridge implementation
+      is out of scope).
+
+1.4.  Relationship to Other Protocols
+
+   AudioBus is informed by, but distinct from,
+   several existing protocols:
+
+   IEEE 1722 (AVTP):  AudioBus shares the concept
+      of presentation timestamps but does not
+      require AVB-capable switches, gPTP, or
+      Stream Reservation Protocol.
+
+   AES67:  AudioBus targets similar audio quality
+      but operates at Layer 2 rather than Layer 3,
+      eliminating IP/UDP overhead and ARP/IGMP
+      dependencies.
+
+   IEEE 1588 (PTP):  AudioBus uses a constrained
+      profile of PTP for clock synchronization
+      (Section 7).  The profile is not compatible
+      with the default PTP profile or gPTP; it
+      uses a dedicated multicast address and
+      AudioBus packet encapsulation.
+
+   MIDI 2.0 (UMP):  AudioBus tunnels raw MIDI
+      bytes; it does not implement the Universal
+      MIDI Packet format.  An application layer
+      MAY encapsulate UMP within the MIDI tunnel.
+
+1.5.  Document Organization
+
+   The remainder of this document is organized as
+   follows:
+
+   Section 2 defines terminology and conventions.
+
+   Section 3 describes the protocol architecture,
+   including the layer model, transport modes, node
+   roles, stream model, node lifecycle, and timing
+   model.
+
+   Section 4 specifies the common packet format
+   shared by all AudioBus packet types in both
+   transport modes.
+
+   Section 5 specifies the Ethernet transport,
+   including frame encapsulation, multicast
+   addressing, VLAN tagging, and QoS.
+
+   Section 6 specifies the LVDS serial transport,
+   including the physical layer, 8b10b coding, TDM
+   frame structure, and daisy-chain forwarding.
+
+   Section 7 specifies clock synchronization using
+   the AudioBus PTP profile.
+
+   Sections 8 through 17 (published separately)
+   cover node discovery, stream management, audio
+   transport, control tunneling, metadata, latency
+   measurement, error handling, extensibility,
+   security, and IANA considerations.
 
 
 2.  Terminology and Conventions
 
 2.1.  Requirements Language
 
-   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL",
-   "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",
-   "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this
-   document are to be interpreted as described in BCP 14
-   [RFC2119] [RFC8174] when, and only when, they appear
-   in all capitals, as shown here.
+   The key words "MUST", "MUST NOT", "REQUIRED",
+   "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT",
+   "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+   "OPTIONAL" in this document are to be interpreted
+   as described in BCP 14 [RFC2119] [RFC8174] when,
+   and only when, they appear in all capitals, as
+   shown here.
 
 2.2.  Definitions
 
    Node:  A device that participates in the AudioBus
-      protocol as a talker, listener, or both.
+      protocol by sending, receiving, or forwarding
+      AudioBus packets.  A node has exactly one Node
+      UID and at least one network interface on which
+      it operates the protocol.
 
    Talker:  A node that publishes one or more audio
-      streams.
+      streams.  A talker originates AUDIO packets and
+      transmits STREAM_ANNOUNCE messages describing
+      each stream it offers.
 
    Listener:  A node that subscribes to one or more
-      audio streams.
+      audio streams.  A listener receives AUDIO
+      packets, buffers them, and presents them at the
+      indicated presentation timestamp.
+
+   Talker-Listener:  A node that acts simultaneously
+      as both a talker and a listener.  This is the
+      common case for devices such as mixing consoles
+      and digital signal processors.
 
    Stream:  A unidirectional flow of audio data from
-      one talker to one or more listeners.  A stream
-      has a fixed sample rate and bit depth, and a
-      dynamic channel count.
+      exactly one talker to one or more listeners.
+      A stream has a fixed sample rate and bit depth,
+      and a dynamic channel count that may change
+      during the lifetime of the stream.
 
-   Stream ID:  A 16-bit identifier unique within the
-      scope of its talker.
+   Stream ID:  A 16-bit unsigned integer that
+      uniquely identifies a stream within the scope
+      of its originating talker.  The combination of
+      Talker UID and Stream ID is globally unique
+      within the AudioBus network.
 
-   Node UID:  A 32-bit identifier unique within an
-      AudioBus network.
+   Node UID:  A 32-bit unsigned integer that
+      uniquely identifies a node within an AudioBus
+      network.  The UID is derived from the node's
+      MAC address (Section 8.3) or assigned by other
+      means, provided uniqueness is guaranteed.
 
-   Presentation Timestamp:  A 64-bit nanosecond
-      timestamp in the PTP time base indicating when
-      audio samples SHOULD begin playout.
+   Presentation Timestamp (PTS):  A 64-bit signed
+      integer representing a time in nanoseconds
+      relative to the PTP epoch (1 January 1970
+      00:00:00 TAI).  The PTS indicates the instant
+      at which the first audio sample in a packet
+      SHOULD begin playout at all listeners.
 
-   Grandmaster:  The node whose clock is the reference
-      for all other nodes, elected via the Best Master
-      Clock algorithm.
+   Grandmaster (GM):  The node whose clock serves as
+      the reference for all other nodes in the
+      AudioBus network.  The grandmaster is elected
+      via the Best Master Clock algorithm
+      (Section 7.2).  In LVDS mode, the bus master
+      is always the grandmaster.
 
-   Packet Interval:  The time in microseconds between
-      consecutive audio packets within a stream.
+   Slave:  In the context of PTP, a node that
+      synchronizes its clock to the grandmaster.  In
+      LVDS mode, a slave is any node that is not the
+      bus master.
 
-   Slot Map:  (LVDS only) A fixed assignment of byte
-      positions within the TDM frame to audio channels
-      and tunnel streams.
+   Bus Master:  (LVDS mode only.)  The node at
+      position 0 in the daisy chain that generates
+      the bus clock, initiates frame transmissions,
+      and computes the slot map.
 
-   Guard Time:  (LVDS only) Idle symbols inserted at
-      direction boundaries for CDR re-lock.
+   Packet Interval:  The time in microseconds
+      between consecutive AUDIO packets within a
+      single stream.  The default is 1000
+      microseconds (1 millisecond).
+
+   Beacon Interval:  The time in milliseconds
+      between consecutive BEACON packets from a
+      single node.  The nominal value is 1000
+      milliseconds.
+
+   Slot Map:  (LVDS mode only.)  A table computed
+      by the bus master that assigns byte offsets
+      within the TDM frame to audio channels and
+      tunnel data for each node in the chain.
+
+   Guard Time:  (LVDS mode only.)  A period of idle
+      symbols inserted at the boundary between
+      downstream and upstream phases within a TDM
+      frame, allowing the clock and data recovery
+      circuit at the receiver to re-lock after the
+      direction change.
+
+   Frame Period:  The duration of one TDM frame in
+      LVDS mode, equal to the reciprocal of the
+      audio sample rate (e.g., 20.833 microseconds
+      at 48 kHz).
+
+   Convergence Time:  The maximum time from a
+      topology change event (node join, departure,
+      or grandmaster loss) until the protocol
+      reaches a stable state.  The convergence time
+      MUST NOT exceed 4000 milliseconds.
+
+   Playout Buffer:  A FIFO buffer at a listener
+      that accumulates audio samples received ahead
+      of their presentation timestamp and releases
+      them for digital-to-analog conversion at the
+      correct instant.
+
+   CRC-32:  The 32-bit cyclic redundancy check
+      defined in IEEE 802.3 [IEEE802.3], polynomial
+      0x04C11DB7, used for frame integrity
+      verification.
+
+   CRC-8:  The 8-bit cyclic redundancy check with
+      polynomial 0x07 (x^8 + x^2 + x + 1), used
+      for slot map verification in LVDS mode.
+
+2.3.  Notation
+
+   This document uses the following notational
+   conventions:
+
+   -  Packet diagrams use the format defined in
+      [RFC9562], with bit 0 as the most significant
+      bit of the first octet.
+
+   -  All multi-octet integer fields are in network
+      byte order (big-endian) unless stated
+      otherwise.
+
+   -  Hexadecimal values are prefixed with "0x".
+
+   -  Binary values are prefixed with "0b".
+
+   -  ABNF notation follows [RFC5234] and
+      [RFC7405].
+
+   -  The operator "|" in ABNF denotes alternatives.
+
+   -  The notation "N*M" in ABNF denotes repetition
+      of at least N and at most M occurrences.
+
+   -  Field sizes are given in octets unless
+      explicitly noted as bits.
 
 
 3.  Protocol Architecture
 
 3.1.  Layer Model
 
-   +-------------------------------------------------+
-   |            Application Layer                     |
-   +-------------------------------------------------+
-   |            Stream Management                     |
-   |  (discovery, announce, subscribe, metadata)      |
-   +-------------------------------------------------+
-   |            Audio Transport                       |
-   |  (packetization, timestamps, sequencing)         |
-   +-------------------------------------------------+
-   |            Clock Synchronization                 |
-   |  (PTP profile, grandmaster election)             |
-   +-------------------------------------------------+
-   |            Control Tunnel                        |
-   |  (GPIO, MIDI, SPI, I2C)                          |
-   +-------------------------------------------------+
-   |            Framing                               |
-   |  (common header, CRC)                            |
-   +-------------------------------------------------+
-   |            Transport                             |
-   |  +-------------------+  +-------------------+   |
-   |  | Ethernet (L2)     |  | LVDS Serial (TDM) |   |
-   |  +-------------------+  +-------------------+   |
-   +-------------------------------------------------+
-   |            Physical                              |
-   |  +-------------------+  +-------------------+   |
-   |  | 100/1000BASE-T    |  | LVDS twisted pair |   |
-   |  +-------------------+  +-------------------+   |
-   +-------------------------------------------------+
+   AudioBus is organized into the following
+   protocol layers.  Each layer depends only on
+   the services of the layer immediately below it.
+
+   +-----------------------------------------------+
+   |          Application Layer                     |
+   |  (user-facing audio routing, UI, control)      |
+   +-----------------------------------------------+
+   |          Stream Management Layer               |
+   |  (discovery, announce, subscribe, metadata)    |
+   +-----------------------------------------------+
+   |          Audio Transport Layer                 |
+   |  (packetization, presentation timestamps,      |
+   |   sequencing, playout buffering)               |
+   +-----------------------------------------------+
+   |          Clock Synchronization Layer           |
+   |  (PTP profile, grandmaster election,           |
+   |   offset/delay computation, clock servo)       |
+   +-----------------------------------------------+
+   |          Control Tunnel Layer                  |
+   |  (GPIO, MIDI, SPI, I2C multiplexing)           |
+   +-----------------------------------------------+
+   |          Framing Layer                         |
+   |  (common header, packet type dispatch,         |
+   |   integrity check)                             |
+   +-----------------------------------------------+
+   |          Transport Layer                       |
+   | +-------------------+ +---------------------+ |
+   | | Ethernet (L2)     | | LVDS Serial (TDM)   | |
+   | | IEEE 802.3        | | 8b10b half-duplex    | |
+   | +-------------------+ +---------------------+ |
+   +-----------------------------------------------+
+   |          Physical Layer                        |
+   | +-------------------+ +---------------------+ |
+   | | 100/1000BASE-T    | | LVDS twisted pair    | |
+   | | (copper/fiber)    | | (TIA/EIA-644)        | |
+   | +-------------------+ +---------------------+ |
+   +-----------------------------------------------+
 
          Figure 1: AudioBus Protocol Layer Model
+
+   The Application Layer is outside the scope of
+   this specification.  It consumes decoded audio
+   samples, processes control tunnel data, and
+   presents stream information to the user.
+
+   The Stream Management Layer handles node
+   discovery (Section 8), stream announcement and
+   subscription (Section 9), metadata distribution
+   (Section 12), and latency measurement
+   (Section 13).
+
+   The Audio Transport Layer handles packetization
+   of raw audio samples, attachment of presentation
+   timestamps referenced to the PTP time base,
+   sequence numbering for loss detection, and
+   playout buffer management (Section 10).
+
+   The Clock Synchronization Layer implements the
+   AudioBus PTP profile (Section 7), including
+   grandmaster election, two-step Sync/Follow_Up
+   exchange, Delay_Req/Delay_Resp measurement, and
+   the clock servo that disciplines the local
+   oscillator to the grandmaster reference.
+
+   The Control Tunnel Layer multiplexes GPIO, MIDI,
+   SPI, and I2C data into tunnel packets
+   (Section 11).  Tunnel data is transported
+   alongside audio but with independent timing.
+
+   The Framing Layer prepends the 12-octet common
+   header (Section 4.1) to every payload and
+   dispatches received packets to the appropriate
+   upper layer based on the Pkt Type field.
+
+   The Transport Layer performs encapsulation into
+   Ethernet frames (Section 5) or LVDS TDM frames
+   (Section 6).  The two transports are mutually
+   exclusive on a given interface; a single node
+   MAY operate both transports on different
+   interfaces simultaneously.
+
+   The Physical Layer is the electrical and
+   mechanical specification of the medium.
+   Ethernet mode uses standard IEEE 802.3 copper
+   or fiber optic media.  LVDS mode uses a single
+   differential twisted pair conforming to
+   TIA/EIA-644 [TIA644].
 
 3.2.  Transport Modes
 
    AudioBus defines two transport modes:
 
-   Ethernet Mode:  Packets are encapsulated in IEEE
-      802.3 frames with a dedicated EtherType.  Nodes
-      connect to commodity switches in star or tree
-      topologies.  Up to 64 nodes are supported.
+   3.2.1.  Ethernet Mode
 
-   LVDS Mode:  Audio and control data are multiplexed
-      into a synchronous TDM frame on a single twisted
-      pair using LVDS signaling with 8b10b coding.
-      Nodes connect in a daisy-chain topology with
-      latency of approximately 21 microseconds per hop.
+   In Ethernet mode, AudioBus packets are
+   encapsulated in IEEE 802.3 frames using
+   EtherType 0x88B6 (Section 5.2).  Nodes connect
+   to commodity Layer 2 switches in star or tree
+   topologies.  Communication uses multicast MAC
+   addresses (Section 5.3) with dedicated groups
+   for discovery/control, PTP synchronization, and
+   per-stream audio delivery.
 
-   An implementation MAY support one or both modes.
-   A bridge node MAY interconnect an Ethernet segment
-   with an LVDS daisy chain.
+   Up to 64 nodes are supported on a single
+   Ethernet segment.  The practical limit is
+   determined by available bandwidth, which depends
+   on the aggregate channel count, sample rate, bit
+   depth, and packet interval of all active streams
+   (Section 5.7).
+
+   All Ethernet-mode nodes are peers.  There is no
+   master/slave distinction; the grandmaster role
+   is elected dynamically and may migrate between
+   nodes.
+
+   3.2.2.  LVDS Mode
+
+   In LVDS mode, audio and control data are
+   multiplexed into a synchronous TDM frame
+   transmitted over a single LVDS twisted pair
+   using 8b10b line coding (Section 6.2).
+
+   Nodes connect in a daisy-chain topology:
+
+     Master <-> Node 1 <-> Node 2 <-> ... <-> N
+
+   One node (node ID 0) is the bus master.  The
+   bus master generates the line clock, initiates
+   every frame transmission, and computes the slot
+   map that assigns bandwidth to each node.  All
+   other nodes are slaves.
+
+   Up to 16 nodes (1 master + 15 slaves) are
+   supported on a single LVDS chain.  The maximum
+   is limited by the frame size and per-hop
+   forwarding latency.
+
+   The LVDS link is half-duplex: downstream data
+   (master to slaves) and upstream data (slaves to
+   master) occupy separate phases within each frame
+   (Section 6.6).
+
+   3.2.3.  Bridge Operation
+
+   An implementation MAY bridge between an Ethernet
+   segment and an LVDS chain.  A bridge node
+   participates in the Ethernet-mode protocol on
+   its Ethernet interface and acts as the bus master
+   on its LVDS interface.  The bridge translates
+   between the two encapsulations, forwarding audio,
+   control, and synchronization traffic in both
+   directions.
+
+   The bridge MUST propagate the PTP time base from
+   the Ethernet grandmaster to the LVDS chain.  If
+   the bridge itself is the Ethernet grandmaster,
+   the LVDS chain uses the bridge's clock directly.
+
+   Detailed bridge algorithms are outside the scope
+   of this specification.
 
 3.3.  Node Roles
 
-   In Ethernet mode, all nodes are peers.  Any node MAY
-   be a talker, listener, or both.  The grandmaster is
-   elected automatically.
+   3.3.1.  Ethernet Mode Roles
 
-   In LVDS mode, one node is the bus master (node ID 0).
-   The master generates the bus clock and initiates
-   frame transmissions.  All other nodes are slaves.
+   In Ethernet mode, every node is a peer.  A node
+   MAY assume any combination of the following
+   roles:
+
+   Talker:  A node that originates one or more
+      audio streams.  A talker transmits
+      STREAM_ANNOUNCE and AUDIO packets.
+
+   Listener:  A node that consumes one or more
+      audio streams.  A listener transmits
+      SUBSCRIBE packets and receives AUDIO packets.
+
+   Grandmaster:  The node elected by the Best
+      Master Clock algorithm (Section 7.2) to
+      serve as the PTP reference.  The grandmaster
+      transmits PTP_SYNC and PTP_FOLLOW_UP messages
+      and responds to PTP_DELAY_REQ messages.
+
+   A node MUST be prepared to assume or relinquish
+   the grandmaster role at any time as a result of
+   BMC re-election.
+
+   3.3.2.  LVDS Mode Roles
+
+   In LVDS mode, nodes have a fixed master/slave
+   relationship:
+
+   Bus Master:  Node ID 0.  Generates the line
+      clock.  Transmits downstream frame data.
+      Receives upstream frame data.  Computes and
+      distributes the slot map.  Acts as the PTP
+      grandmaster for the chain.
+
+   Slave:  Node IDs 1 through 15.  Receives
+      downstream frame data.  Extracts assigned
+      audio and tunnel slots.  Inserts upstream
+      audio and tunnel data.  Forwards the frame
+      to the next node in the chain.
+
+   The master/slave assignment is determined by
+   physical wiring and cannot change at runtime
+   without rewiring the chain.
 
 3.4.  Stream Model
 
-   A stream is a unidirectional, multi-channel audio
-   flow characterized by:
+   A stream is a unidirectional, multi-channel
+   audio flow characterized by the following
+   immutable and mutable properties:
 
-   -  Stream ID (16-bit, unique per talker)
-   -  Talker UID (32-bit)
-   -  Channel count (1 to 64, dynamic)
-   -  Sample rate (44100, 48000, 88200, or 96000 Hz)
-   -  Bit depth (16, 24, or 32 bits)
-   -  Packet interval (125 to 4000 microseconds)
-   -  Encoding (0 = linear PCM)
+   Immutable properties (fixed at creation):
 
-   A talker MAY publish multiple concurrent streams.
-   A listener MAY subscribe to multiple streams.
-   Listeners MAY subscribe to a channel subset via
-   a bitmask.
+   -  Stream ID: a 16-bit unsigned integer, unique
+      within the scope of the originating talker.
+      Valid range: 0x0001 to 0xFFFF.  The value
+      0x0000 is reserved and MUST NOT be used.
+
+   -  Talker UID: the 32-bit Node UID of the
+      originating talker.
+
+   -  Sample rate: one of 44100, 48000, 88200, or
+      96000 Hz.
+
+   -  Bit depth: one of 16, 24, or 32 bits per
+      sample.
+
+   -  Encoding: a single octet identifying the
+      sample encoding.  This specification defines
+      only encoding 0 (linear PCM).  Values 1
+      through 255 are reserved for future use.
+
+   Mutable properties (may change at runtime):
+
+   -  Channel count: 1 to 64.  Changes are
+      signaled by a new STREAM_ANNOUNCE with the
+      updated count (Section 9.4).
+
+   -  Packet interval: 125, 250, 500, 1000, 2000,
+      or 4000 microseconds.  A change in packet
+      interval is signaled by a new
+      STREAM_ANNOUNCE.
+
+   -  Channel labels: UTF-8 strings identifying
+      each channel (e.g., "Left", "Right",
+      "Sub").
+
+   A talker MAY publish up to 255 concurrent
+   streams.  The practical limit is determined
+   by available bandwidth.
+
+   A listener MAY subscribe to up to 255 streams
+   simultaneously.
+
+   A listener MAY subscribe to a subset of channels
+   within a stream by providing a channel bitmask
+   in the SUBSCRIBE message (Section 9.3).  The
+   talker transmits all channels regardless of
+   subscriber interest; channel selection is
+   performed at the listener.
+
+3.5.  Node Lifecycle State Machine
+
+   Every AudioBus node progresses through the
+   following states from power-on to steady-state
+   operation.  The state machine applies to both
+   Ethernet and LVDS modes unless noted.
+
+                  +----------+
+                  |          |
+                  |   INIT   |
+                  |          |
+                  +----+-----+
+                       |
+              link detected
+                       |
+                       v
+                  +----------+
+                  |          |
+                  | DISCOVER |<--------+
+                  |          |         |
+                  +----+-----+         |
+                       |               |
+             GM elected (BMC)          |
+                       |               |
+                       v               |
+                  +----------+         |
+                  |          |    GM lost
+                  | SYNCING  |    (3x miss)
+                  |          +---------+
+                  +----+-----+
+                       |
+             offset < 1 us
+                       |
+                       v
+                  +----------+
+                  |          |
+                  |  READY   |<-----+
+                  |          |      |
+                  +----+-----+      |
+                       |            |
+             streams active    stream
+                       |       change
+                       v            |
+                  +----------+      |
+                  |          |      |
+                  | RUNNING  +------+
+                  |          |
+                  +----+-----+
+                       |
+              link lost / shutdown
+                       |
+                       v
+                  +----------+
+                  |          |
+                  |   DOWN   |
+                  |          |
+                  +----------+
+
+     Figure 2: Node Lifecycle State Machine
+
+   INIT:  The node has powered on and is
+      initializing hardware.  No packets are sent
+      or received.  In Ethernet mode, the node
+      waits for link-up on its Ethernet interface.
+      In LVDS mode, the slave waits for the master
+      to begin frame transmissions.
+
+      Exit condition: physical link is detected.
+      Transition to: DISCOVER.
+
+   DISCOVER:  The node begins transmitting BEACON
+      packets and listening for BEACON packets
+      from other nodes.  It participates in the
+      Best Master Clock election (Section 7.2).
+
+      In LVDS mode, a slave enters DISCOVER when
+      it first receives a valid TDM frame from the
+      master.  The master enters DISCOVER
+      immediately upon link-up.
+
+      Exit condition: a grandmaster is elected
+      (either self or another node).
+      Transition to: SYNCING.
+
+      Timeout: if no grandmaster is elected within
+      5000 milliseconds, the node with the lowest
+      UID MUST assume the grandmaster role and
+      transition to SYNCING.
+
+   SYNCING:  The node is synchronizing its clock
+      to the grandmaster.  If this node is the
+      grandmaster, SYNCING is instantaneous.  The
+      node transmits and receives PTP messages
+      (Section 7) and runs the clock servo
+      (Section 7.8).
+
+      Exit condition: the clock offset is below
+      1 microsecond for at least 3 consecutive
+      measurement cycles.
+      Transition to: READY.
+
+      Error condition: if the grandmaster becomes
+      unreachable (3 consecutive Sync misses,
+      375 ms), the node transitions back to
+      DISCOVER for BMC re-election.
+
+   READY:  The node's clock is synchronized.  The
+      node transmits STREAM_ANNOUNCE for each
+      stream it offers.  It may transmit SUBSCRIBE
+      for streams it wishes to receive.
+
+      Exit condition: at least one stream is
+      actively sending or receiving audio data.
+      Transition to: RUNNING.
+
+   RUNNING:  Normal operation.  Audio, tunnel,
+      metadata, and latency measurement packets
+      flow.  The node continues to maintain PTP
+      synchronization and transmit beacons.
+
+      On stream configuration change (channel
+      count update, new subscription, or
+      unsubscription), the node transitions
+      briefly to READY, applies the change, and
+      returns to RUNNING.
+
+      Error condition: if the grandmaster is lost,
+      transition to DISCOVER.
+
+   DOWN:  The node has lost its physical link or
+      is shutting down.  All streams are torn down.
+      The node ceases all transmission.
+
+      In LVDS mode, a slave enters DOWN if it has
+      not received a valid TDM frame for 10
+      consecutive frame periods.  The master enters
+      DOWN on explicit shutdown command.
+
+      From DOWN, the node returns to INIT if the
+      link is re-established.
+
+3.6.  Timing Model
+
+   AudioBus employs a layered timing model with
+   the following time references:
+
+   3.6.1.  PTP Time Base
+
+   All timestamps in AudioBus are expressed in
+   nanoseconds relative to the PTP epoch
+   (1 January 1970 00:00:00 TAI).  The PTP time
+   base is maintained by the grandmaster and
+   distributed to all nodes via the Sync/Follow_Up
+   and Delay_Req/Delay_Resp exchanges
+   (Section 7).
+
+   The target accuracy is less than 1 microsecond
+   between any two nodes.  This is sufficient for
+   sample-accurate playout at sample rates up to
+   96 kHz, where one sample period is
+   approximately 10.4 microseconds.
+
+   3.6.2.  Media Clock
+
+   The media clock generates audio sample
+   interrupts at the nominal sample rate (e.g.,
+   48000 Hz).  The media clock is derived from the
+   PTP time base using a phase-locked loop (PLL)
+   or numerically controlled oscillator (NCO) as
+   described in Section 7.9.
+
+   The media clock MUST have a frequency accuracy
+   of +/- 1 ppm relative to the PTP reference.
+   The peak-to-peak jitter of the media clock
+   MUST NOT exceed 1 nanosecond at the DAC output.
+
+   3.6.3.  Presentation Latency
+
+   The presentation latency is the fixed offset
+   added to the current PTP time to compute the
+   presentation timestamp for each audio packet:
+
+      PTS = T_now + L_pres
+
+   where T_now is the current PTP time at the
+   talker and L_pres is the presentation latency.
+
+   The default presentation latency is 2,000,000
+   nanoseconds (2 milliseconds).  The minimum
+   presentation latency MUST be sufficient to
+   absorb the maximum expected network delay plus
+   playout buffer fill time:
+
+      L_pres >= D_net_max + D_buf
+
+   where D_net_max is the worst-case one-way
+   network delay and D_buf is the playout buffer
+   depth (Section 10.7).
+
+   Implementations SHOULD allow the presentation
+   latency to be configured per stream.
+
+   3.6.4.  Timing Diagram
+
+   The following diagram shows the timing
+   relationships for a single audio packet in
+   Ethernet mode:
+
+   Talker                             Listener
+     |                                    |
+     | [sample capture]                   |
+     |     T_cap                          |
+     |                                    |
+     | [packetize + stamp]                |
+     |     PTS = T_cap + L_pres           |
+     |                                    |
+     | -------- AUDIO packet ---------> |
+     |     (network delay D_net)          |
+     |                                    |
+     |                    [buffer sample] |
+     |                       T_arrive     |
+     |                                    |
+     |                    [wait for PTS]  |
+     |                                    |
+     |                    [playout]       |
+     |                       T_play = PTS |
+     |                                    |
+
+        Figure 3: Audio Packet Timing
 
 
 4.  Common Packet Format
 
 4.1.  Common Header
 
-   All AudioBus packets begin with a 12-octet header:
+   Every AudioBus packet in both transport modes
+   begins with a 12-octet common header.  The
+   header provides version identification, packet
+   type dispatch, source identification, sequence
+   numbering, and payload delineation.
+
+    0                   1                   2
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Version    |   Pkt Type    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |            Flags              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                               |
+   |         Source UID            |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |       Sequence Number         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |       Payload Length          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   In 32-bit-aligned bit-ruler format:
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -382,263 +1088,1163 @@ Table of Contents
    |       Sequence Number         |       Payload Length          |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 2: AudioBus Common Header
+            Figure 4: AudioBus Common Header
 
-   Version:  8 bits.  Protocol version.  This document
-      defines version 1.  Receivers MUST discard packets
-      with an unrecognized version (Section 14.2).
+   The following paragraphs describe each field.
 
-   Pkt Type:  8 bits.  Payload type (Section 4.2).
+   Version (octet 0):
 
-   Flags:  16 bits.
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 1 to 255.
+      Default: 1.
 
-      Bit 0:  VLAN tag present (Ethernet only).
-      Bits 1-3:  Reserved.  MUST be zero on transmit.
-         Receivers MUST ignore these bits.
-      Bits 4-9:  DSCP value for QoS (Section 5.5).
-      Bits 10-15:  Reserved.  MUST be zero.
+      This field identifies the AudioBus protocol
+      version.  This document defines version 1.
+      A receiver MUST silently discard any packet
+      whose Version field contains a value it does
+      not support (Section 14.2).  A receiver MUST
+      NOT attempt to parse the payload of a packet
+      with an unsupported version.
 
-   Source UID:  32 bits.  Unique identifier of the
-      originating node (Section 8.3).
+      The value 0 is reserved and MUST NOT be
+      transmitted.  A receiver that encounters
+      version 0 MUST discard the packet and
+      SHOULD increment a "malformed packet" counter.
 
-   Sequence Number:  16 bits.  Per-source counter.
-      Incremented by one for each packet.  Wraps from
-      65535 to 0.
+   Pkt Type (octet 1):
 
-   Payload Length:  16 bits.  Length of the payload
-      following this header, in octets.  Does not
-      include the 12-octet header.
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0x00 to 0xFF, subject to the
+         registry in Section 4.3.
+      Default: none; this field is always explicitly
+         set by the transmitter.
 
-4.2.  Packet Type Registry
+      This field identifies the type of payload
+      that follows the common header.  The receiver
+      uses this field to dispatch the packet to
+      the appropriate processing function.
 
-   +---------+------------------+----------------------------+
-   | Value   | Name             | Reference                  |
-   +---------+------------------+----------------------------+
-   | 0x00    | Reserved         |                            |
-   | 0x01    | AUDIO            | Section 10.1               |
-   | 0x02    | BEACON           | Section 8.1                |
-   | 0x03    | SUBSCRIBE        | Section 9.3                |
-   | 0x04    | UNSUBSCRIBE      | Section 9.3                |
-   | 0x05    | STREAM_ANNOUNCE  | Section 9.1                |
-   | 0x06    | STREAM_DELETE    | Section 9.5                |
-   | 0x10    | PTP_SYNC         | Section 7.3                |
-   | 0x11    | PTP_FOLLOW_UP    | Section 7.4                |
-   | 0x12    | PTP_DELAY_REQ    | Section 7.5                |
-   | 0x13    | PTP_DELAY_RESP   | Section 7.6                |
-   | 0x20    | TUNNEL           | Section 11.1               |
-   | 0x30    | METADATA         | Section 12.1               |
-   | 0x40    | PING             | Section 13.1               |
-   | 0x41    | PONG             | Section 13.2               |
-   | 0x50-7F | Private Use      | Section 15.3               |
-   | 0x80-FF | Reserved         |                            |
-   +---------+------------------+----------------------------+
+      A receiver MUST silently discard any packet
+      whose Pkt Type value is not recognized
+      (Section 14.1).  A receiver MUST NOT
+      attempt to interpret the payload of an
+      unrecognized packet type.
 
-            Table 1: Packet Type Values
+   Flags (octets 2-3):
 
-   Receivers MUST discard packets with unrecognized
-   type values (Section 14.1).
+      Type: 16-bit bitfield.
+      Size: 2 octets.
+      Default: 0x0000.
 
-4.3.  Byte Ordering
+      The Flags field is a 16-bit bitfield with
+      the following layout (bit 0 is the most
+      significant bit of octet 2):
 
-   All multi-octet integer fields are encoded in network
-   byte order (big-endian) per [RFC791].
+      Bit 0 (0x8000): VLAN.
 
-   Audio sample data is encoded in big-endian byte order
-   (most significant octet first) within each sample
-   word (Section 10.2).
+         Set to 1 if the Ethernet frame carrying
+         this packet includes an IEEE 802.1Q VLAN
+         tag.  Set to 0 otherwise.  In LVDS mode,
+         this bit MUST be 0.
+
+         If this bit is set but no VLAN tag is
+         present in the encapsulating frame, the
+         receiver MUST process the packet normally
+         but SHOULD log a warning.
+
+      Bits 1-3 (0x7000): Reserved.
+
+         These bits are reserved for future use.
+         A transmitter MUST set these bits to 0.
+         A receiver MUST ignore these bits.
+
+      Bits 4-9 (0x0FC0): DSCP.
+
+         A 6-bit Differentiated Services Code
+         Point value indicating the desired QoS
+         treatment (Section 5.5).  In LVDS mode,
+         this field is ignored; transmitters
+         SHOULD set it to 0.
+
+         Valid range: 0 to 63.  If the value is
+         outside this range (which cannot occur
+         in a 6-bit field), the receiver MUST
+         treat it as 0.
+
+      Bits 10-15 (0x003F): Reserved.
+
+         Reserved for future use.  A transmitter
+         MUST set these bits to 0.  A receiver
+         MUST ignore these bits.
+
+   Source UID (octets 4-7):
+
+      Type: unsigned 32-bit integer.
+      Size: 4 octets.
+      Valid range: 0x00000001 to 0xFFFFFFFF.
+      Default: derived from MAC address
+         (Section 8.3).
+
+      This field contains the Node UID of the
+      node that originated this packet.  The
+      Source UID is used by receivers to identify
+      the sender, to correlate streams with their
+      talkers, and to detect duplicate nodes on
+      the network.
+
+      The value 0x00000000 is reserved and MUST
+      NOT appear in the Source UID field.  A
+      receiver that encounters Source UID 0 MUST
+      discard the packet and SHOULD log a warning.
+
+      Forwarding nodes (e.g., LVDS slaves
+      retransmitting frames) MUST NOT modify the
+      Source UID field.  The Source UID always
+      identifies the originator, not the
+      forwarder.
+
+   Sequence Number (octets 8-9):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+      Default: 0 for the first packet; incremented
+         by 1 for each subsequent packet from the
+         same source.
+
+      This field is a per-source monotonically
+      increasing counter.  It increments by one
+      for each packet transmitted by the source,
+      regardless of packet type.  The counter
+      wraps from 65535 to 0.
+
+      The sequence number allows receivers to
+      detect packet loss (gaps in the sequence),
+      packet duplication (repeated sequence
+      numbers), and packet reordering (out-of-
+      order sequence numbers).
+
+      For AUDIO packets, loss detection is
+      critical.  Listeners MUST track expected
+      sequence numbers and report gaps as loss
+      events (Section 10.6).
+
+      For non-AUDIO packets, sequence number
+      tracking is OPTIONAL but RECOMMENDED for
+      diagnostic purposes.
+
+   Payload Length (octets 10-11):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 1476 (Ethernet mode) or
+         0 to the remaining frame capacity minus
+         4 octets for the CRC (LVDS mode).
+      Default: determined by the packet type.
+
+      This field specifies the number of octets
+      in the payload that immediately follows
+      the 12-octet common header.  It does not
+      include the common header itself.
+
+      A Payload Length of 0 is valid and indicates
+      a header-only packet (used by some control
+      messages).
+
+      A receiver MUST verify that Payload Length
+      is consistent with the encapsulating frame
+      size.  In Ethernet mode, the total frame
+      payload (common header + payload) MUST NOT
+      exceed 1488 octets (12 + 1476).  If the
+      Payload Length field indicates more data
+      than is actually present in the frame, the
+      receiver MUST discard the packet.
+
+      In LVDS mode, the Payload Length MUST NOT
+      exceed the capacity of the current TDM
+      frame's auxiliary data region.
+
+4.2.  ABNF for Common Header
+
+   The following ABNF grammar [RFC5234] formally
+   defines the common header and associated types.
+
+   ; --- Core field types ---
+
+   uint8        = OCTET
+   uint16       = 2OCTET
+   uint32       = 4OCTET
+   uint64       = 8OCTET
+
+   ; --- Common header ---
+
+   common-hdr   = version pkt-type flags
+                  source-uid seq-num payload-len
+
+   version      = uint8
+                  ; value 1 for this specification
+
+   pkt-type     = uint8
+                  ; see packet-type-value
+
+   flags        = uint16
+                  ; bitfield, see Section 4.1
+
+   source-uid   = uint32
+                  ; non-zero
+
+   seq-num      = uint16
+
+   payload-len  = uint16
+                  ; 0..1476 in Ethernet mode
+
+   ; --- Packet type values ---
+
+   packet-type-value =
+       %x01 /  ; AUDIO
+       %x02 /  ; BEACON
+       %x03 /  ; SUBSCRIBE
+       %x04 /  ; UNSUBSCRIBE
+       %x05 /  ; STREAM_ANNOUNCE
+       %x06 /  ; STREAM_DELETE
+       %x10 /  ; PTP_SYNC
+       %x11 /  ; PTP_FOLLOW_UP
+       %x12 /  ; PTP_DELAY_REQ
+       %x13 /  ; PTP_DELAY_RESP
+       %x20 /  ; TUNNEL
+       %x30 /  ; METADATA
+       %x40 /  ; PING
+       %x41    ; PONG
+
+   ; --- Flag bits ---
+   ;
+   ; Bit  0 (MSB of flags): VLAN present
+   ; Bits 1-3: reserved (zero)
+   ; Bits 4-9: DSCP (6 bits)
+   ; Bits 10-15: reserved (zero)
+
+   ; --- Full AudioBus packet ---
+
+   audiobus-pkt = common-hdr payload
+
+   payload      = *OCTET
+                  ; length determined by
+                  ; payload-len field
+
+      Figure 5: ABNF Grammar for Common Header
+
+4.3.  Packet Type Registry
+
+   The following table enumerates all packet types
+   defined by this specification.
+
+   +---------+------------------+-----------+
+   | Value   | Name             | Reference |
+   +---------+------------------+-----------+
+   | 0x00    | Reserved         | --        |
+   | 0x01    | AUDIO            | Sec 10.1  |
+   | 0x02    | BEACON           | Sec 8.1   |
+   | 0x03    | SUBSCRIBE        | Sec 9.3   |
+   | 0x04    | UNSUBSCRIBE      | Sec 9.3   |
+   | 0x05    | STREAM_ANNOUNCE  | Sec 9.1   |
+   | 0x06    | STREAM_DELETE    | Sec 9.5   |
+   | 0x07-0F | Reserved         | --        |
+   | 0x10    | PTP_SYNC         | Sec 7.3   |
+   | 0x11    | PTP_FOLLOW_UP    | Sec 7.4   |
+   | 0x12    | PTP_DELAY_REQ    | Sec 7.5   |
+   | 0x13    | PTP_DELAY_RESP   | Sec 7.6   |
+   | 0x14-1F | Reserved (PTP)   | --        |
+   | 0x20    | TUNNEL           | Sec 11.1  |
+   | 0x21-2F | Reserved (Tun.)  | --        |
+   | 0x30    | METADATA         | Sec 12.1  |
+   | 0x31-3F | Reserved (Meta)  | --        |
+   | 0x40    | PING             | Sec 13.1  |
+   | 0x41    | PONG             | Sec 13.2  |
+   | 0x42-4F | Reserved (Diag)  | --        |
+   | 0x50-7F | Private Use      | Sec 15.3  |
+   | 0x80-FF | Reserved         | --        |
+   +---------+------------------+-----------+
+
+      Table 1: AudioBus Packet Type Registry
+
+   Values in the Reserved ranges MUST NOT be
+   transmitted by conformant implementations.
+   Receivers MUST silently discard packets with
+   reserved type values.
+
+   Values in the Private Use range (0x50-0x7F)
+   MAY be used by vendors for proprietary
+   extensions.  Receivers that do not recognize a
+   private-use type MUST silently discard the
+   packet.  Private-use packet types MUST NOT be
+   registered with IANA.
+
+4.4.  Byte Ordering
+
+   All multi-octet integer fields in AudioBus
+   packets are encoded in network byte order
+   (big-endian), with the most significant octet
+   transmitted first, per [RFC791].
+
+   Audio sample data is also encoded in big-endian
+   byte order (most significant octet first) within
+   each sample word (Section 10.2).
+
+   Implementations on little-endian processors
+   MUST perform byte swapping when reading or
+   writing multi-octet fields.
+
+4.5.  Maximum Packet Size
+
+   The maximum AudioBus payload size is
+   constrained by the encapsulating transport:
+
+   Ethernet mode:
+
+      The maximum Ethernet frame payload (after
+      the EtherType) is 1500 octets.  Subtracting
+      the 12-octet common header and an optional
+      12-octet 802.1Q double-tag, the maximum
+      AudioBus payload is:
+
+         1500 - 12 = 1488 octets (no VLAN)
+         1500 - 12 - 4 = 1484 octets (single tag)
+
+      To ensure interoperability, implementations
+      MUST NOT transmit AudioBus packets with a
+      total size (header + payload) exceeding
+      1488 octets.  Jumbo frames are NOT supported
+      by this specification.
+
+   LVDS mode:
+
+      The maximum payload is determined by the
+      TDM frame size minus the fixed overhead
+      (frame header, sideband, guard, CRC).  See
+      Section 6.3 for frame capacity calculations.
+
+   Implementations MUST NOT fragment AudioBus
+   packets across multiple Ethernet frames or
+   LVDS TDM frames.  Each packet MUST fit entirely
+   within a single encapsulating frame.
+
+4.6.  Packet Integrity
+
+   In Ethernet mode, packet integrity is provided
+   by the IEEE 802.3 Frame Check Sequence (FCS),
+   which is a CRC-32 computed and verified by the
+   Ethernet hardware.  No additional integrity
+   check is applied by the AudioBus protocol layer.
+
+   In LVDS mode, each TDM frame carries a CRC-32
+   computed over all octets from the frame header
+   through the last data octet before the CRC
+   field (Section 6.9).  The CRC polynomial is
+   0x04C11DB7, identical to IEEE 802.3 FCS.
+
+   A receiver that detects a CRC failure MUST
+   discard the entire frame and SHOULD increment
+   a "CRC error" counter.  The receiver MUST NOT
+   attempt to extract audio or control data from
+   a frame with a CRC failure.
 
 
 5.  Ethernet Transport
 
 5.1.  Frame Encapsulation
 
-   AudioBus packets are carried in IEEE 802.3 frames:
+   In Ethernet mode, each AudioBus packet is
+   encapsulated in a single IEEE 802.3 Ethernet
+   frame.  The frame layout is as follows:
 
-   +---------------------+
-   | Destination MAC      |  6 octets
-   +---------------------+
-   | Source MAC            |  6 octets
-   +---------------------+
-   | [802.1Q Tag]          |  4 octets (OPTIONAL)
-   +---------------------+
-   | EtherType             |  2 octets
-   +---------------------+
-   | AudioBus Common Hdr   | 12 octets
-   +---------------------+
-   | Payload               |  variable
-   +---------------------+
-   | FCS                   |  4 octets (by hardware)
-   +---------------------+
+   +-------------------------------------------+
+   | Preamble + SFD          |  8 octets       |
+   +-------------------------------------------+
+   | Destination MAC Address |  6 octets       |
+   +-------------------------------------------+
+   | Source MAC Address      |  6 octets       |
+   +-------------------------------------------+
+   | [802.1Q VLAN Tag]       |  4 octets (opt) |
+   +-------------------------------------------+
+   | EtherType (0x88B6)      |  2 octets       |
+   +-------------------------------------------+
+   | AudioBus Common Header  | 12 octets       |
+   +-------------------------------------------+
+   | AudioBus Payload        | variable        |
+   +-------------------------------------------+
+   | Padding (if needed)     | 0-N octets      |
+   +-------------------------------------------+
+   | Frame Check Sequence    |  4 octets       |
+   +-------------------------------------------+
 
-         Figure 3: Ethernet Encapsulation
+        Figure 6: Ethernet Frame Layout
 
-   An Ethernet frame MUST carry exactly one AudioBus
-   packet.  Implementations MUST NOT concatenate
-   multiple AudioBus packets in a single frame.
+   Preamble and SFD:  Generated and consumed by
+      the Ethernet PHY.  Not part of the AudioBus
+      specification.
+
+   Destination MAC Address:  A multicast MAC
+      address as defined in Section 5.3.  Unicast
+      destination addresses MUST NOT be used for
+      AudioBus packets; all communication is
+      multicast.
+
+   Source MAC Address:  The MAC address of the
+      transmitting interface.  This MUST be the
+      globally unique (OUI-based) MAC address
+      assigned to the interface by its
+      manufacturer.  Locally administered source
+      MAC addresses MUST NOT be used.
+
+   802.1Q VLAN Tag:  Present only if VLAN tagging
+      is enabled (Section 5.4).  When present,
+      the VLAN flag (bit 0) in the AudioBus
+      Flags field MUST be set.
+
+   EtherType:  The 2-octet value 0x88B6
+      (Section 5.2).
+
+   AudioBus Common Header:  The 12-octet header
+      defined in Section 4.1.
+
+   AudioBus Payload:  The packet type-specific
+      payload.  Length is given by the Payload
+      Length field in the common header.
+
+   Padding:  If the total frame data (from
+      Destination MAC through Payload) is fewer
+      than 46 octets, the Ethernet hardware or
+      driver appends zero-valued padding octets
+      to reach the minimum frame size.  AudioBus
+      receivers MUST tolerate padding; the Payload
+      Length field in the common header indicates
+      the actual payload size.
+
+   Frame Check Sequence:  The CRC-32 computed
+      by the Ethernet hardware.  See
+      Section 4.6.
+
+   An Ethernet frame MUST carry exactly one
+   AudioBus packet.  Implementations MUST NOT
+   concatenate multiple AudioBus packets in a
+   single frame.  Implementations MUST NOT split
+   a single AudioBus packet across multiple
+   frames.
+
+   The following ABNF defines the Ethernet frame
+   structure from the perspective of the AudioBus
+   protocol (excluding preamble and FCS, which
+   are handled by hardware):
+
+   eth-frame    = dst-mac src-mac [vlan-tag]
+                  ethertype audiobus-pkt
+
+   dst-mac      = 6OCTET
+   src-mac      = 6OCTET
+   vlan-tag     = %x81.00 tci
+   tci          = uint16
+   ethertype    = %x88.B6
+
+      Figure 7: ABNF for Ethernet Encapsulation
 
 5.2.  EtherType
 
-   AudioBus uses EtherType 0x88B6 (IEEE 802 Local
-   Experimental Ethertype 1).
+   AudioBus uses EtherType 0x88B6, which is the
+   IEEE 802 Local Experimental EtherType 1.
 
-   Note: A dedicated EtherType assignment will be
-   requested from the IEEE Registration Authority
-   upon standardization.
+   This EtherType is reserved by IEEE for local
+   experimental use and does not require
+   registration for private networks.  A dedicated
+   EtherType assignment will be requested from the
+   IEEE Registration Authority if this protocol
+   proceeds to standardization.
+
+   Implementations MUST transmit EtherType 0x88B6
+   in the EtherType field of every AudioBus
+   Ethernet frame.
+
+   Implementations MUST NOT process frames with
+   any other EtherType as AudioBus packets.
+
+   On shared networks, other protocols MAY use
+   the same experimental EtherType.  Receivers
+   MUST verify the Version and Pkt Type fields in
+   the common header before processing any frame
+   received on EtherType 0x88B6.  If the Version
+   is not recognized, the frame MUST be discarded.
 
 5.3.  Multicast Addressing
 
-   AudioBus uses locally administered multicast MAC
-   addresses with prefix 01:60:AB.
+   AudioBus uses locally administered multicast
+   MAC addresses.  All AudioBus multicast
+   addresses share the 3-octet prefix 01:60:AB.
 
-   Discovery and Control:  01:60:AB:FF:FF:00
+   Three address classes are defined:
 
-      Used for BEACON, SUBSCRIBE, UNSUBSCRIBE,
+   5.3.1.  Discovery and Control Group
+
+      Address: 01:60:AB:FF:FF:00
+
+      This group carries BEACON, SUBSCRIBE,
+      UNSUBSCRIBE, STREAM_ANNOUNCE, STREAM_DELETE,
       TUNNEL, METADATA, PING, and PONG packets.
 
-   PTP Synchronization:  01:60:AB:FF:FF:01
+      All nodes MUST join this group upon
+      initialization of the Ethernet interface
+      and MUST NOT leave it while the interface
+      is active.
 
-      Used for PTP_SYNC, PTP_FOLLOW_UP,
+   5.3.2.  PTP Synchronization Group
+
+      Address: 01:60:AB:FF:FF:01
+
+      This group carries PTP_SYNC, PTP_FOLLOW_UP,
       PTP_DELAY_REQ, and PTP_DELAY_RESP packets.
 
-   Audio Streams:  01:60:AB:HH:LL:00
+      All nodes MUST join this group upon
+      initialization and MUST NOT leave it while
+      the interface is active.
 
-      HH and LL are the high and low octets of
-      the 16-bit Stream ID.  Each active stream
-      has a unique multicast address.
+      Separating PTP traffic from discovery/
+      control traffic allows switches that
+      support per-group filtering to prioritize
+      synchronization packets independently.
 
-   Implementations MUST join the discovery and PTP
-   groups on initialization.  Implementations MUST
-   join stream groups upon subscription and leave
-   them upon unsubscription.
+   5.3.3.  Audio Stream Groups
+
+      Address: 01:60:AB:HH:LL:00
+
+      HH is the high octet and LL is the low
+      octet of the 16-bit Stream ID.  Each active
+      stream has a unique multicast address
+      derived from its Stream ID.
+
+      A talker transmits AUDIO packets for a
+      given stream to that stream's multicast
+      address.
+
+      A listener MUST join the multicast group
+      for each stream to which it subscribes
+      and MUST leave the group when it
+      unsubscribes.
+
+      The address 01:60:AB:00:00:00 is reserved
+      (Stream ID 0x0000) and MUST NOT be used
+      as an audio stream group address.
+
+      Example: Stream ID 0x0042 uses multicast
+      address 01:60:AB:00:42:00.
+
+   5.3.4.  Multicast Group Summary
+
+   +-------------------+-------------------------+
+   | Address           | Usage                   |
+   +-------------------+-------------------------+
+   | 01:60:AB:FF:FF:00 | Discovery/Control       |
+   | 01:60:AB:FF:FF:01 | PTP Synchronization     |
+   | 01:60:AB:HH:LL:00 | Audio (per stream)      |
+   | 01:60:AB:00:00:00 | Reserved                |
+   +-------------------+-------------------------+
+
+       Table 2: Multicast Address Assignments
+
+   Implementations MUST configure the Ethernet
+   interface to pass frames addressed to the
+   joined multicast groups.  Implementations
+   SHOULD use hardware multicast filtering where
+   available, rather than promiscuous mode, to
+   minimize CPU load.
 
 5.4.  VLAN Tagging
 
-   Implementations MAY use IEEE 802.1Q VLAN tagging.
+   Implementations MAY use IEEE 802.1Q VLAN
+   tagging to isolate AudioBus traffic from other
+   traffic on the same physical network.
 
-   When used, the VLAN ID MUST be configurable with a
-   default of no tagging.  The Priority Code Point
-   SHOULD be 6 (voice/network control).  All AudioBus
-   nodes on one network MUST use the same VLAN ID.
+   When VLAN tagging is used:
+
+   -  The VLAN ID MUST be configurable.  There is
+      no default VLAN ID; if tagging is enabled,
+      the ID MUST be explicitly set.
+
+   -  All AudioBus nodes on the same network MUST
+      use the same VLAN ID.
+
+   -  The Priority Code Point (PCP) field SHOULD
+      be set to 6 (Class 6, equivalent to
+      Internetwork Control) for all AudioBus
+      frames.
+
+   -  The Drop Eligible Indicator (DEI) MUST be
+      set to 0.
+
+   -  The VLAN flag (bit 0 of the Flags field in
+      the common header) MUST be set to 1.
+
+   When VLAN tagging is not used:
+
+   -  No 802.1Q tag is inserted in the frame.
+
+   -  The VLAN flag (bit 0 of the Flags field)
+      MUST be 0.
+
+   The VLAN tag, when present, is inserted between
+   the Source MAC Address and the EtherType field,
+   per IEEE 802.1Q.  The Tag Protocol Identifier
+   (TPID) is 0x8100.
+
+   Implementations MUST function correctly on
+   networks that do not support VLAN tagging.
 
 5.5.  Quality of Service
 
-   Implementations SHOULD set DSCP values as follows:
+   Implementations SHOULD set Differentiated
+   Services Code Point (DSCP) values in the Flags
+   field (bits 4-9) according to the following
+   table:
 
-   +-----------------------+------------+------------------+
-   | Packet Type           | DSCP Value | PHB              |
-   +-----------------------+------------+------------------+
-   | AUDIO                 | 46         | EF               |
-   | PTP_SYNC/FOLLOW_UP    | 48         | CS6              |
-   | PTP_DELAY_REQ/RESP    | 48         | CS6              |
-   | TUNNEL                | 34         | AF41             |
-   | All others            |  0         | Best Effort      |
-   +-----------------------+------------+------------------+
+   +------------------------+------+----------+
+   | Packet Type(s)         | DSCP | PHB      |
+   +------------------------+------+----------+
+   | PTP_SYNC               |   48 | CS6      |
+   | PTP_FOLLOW_UP          |   48 | CS6      |
+   | PTP_DELAY_REQ          |   48 | CS6      |
+   | PTP_DELAY_RESP         |   48 | CS6      |
+   | AUDIO                  |   46 | EF       |
+   | TUNNEL                 |   34 | AF41     |
+   | BEACON                 |    0 | BE       |
+   | SUBSCRIBE              |    0 | BE       |
+   | UNSUBSCRIBE            |    0 | BE       |
+   | STREAM_ANNOUNCE        |    0 | BE       |
+   | STREAM_DELETE          |    0 | BE       |
+   | METADATA               |    0 | BE       |
+   | PING                   |    0 | BE       |
+   | PONG                   |    0 | BE       |
+   +------------------------+------+----------+
 
-            Table 2: DSCP Assignments
+       Table 3: DSCP Assignments by Packet Type
 
-   Implementations MUST function correctly on networks
-   without QoS support.
+   The DSCP value is purely advisory within the
+   AudioBus header.  Switches that do not inspect
+   the AudioBus header will not honor these values
+   unless the 802.1Q PCP field is also set
+   appropriately (Section 5.4).
+
+   Implementations SHOULD use both the DSCP field
+   in the AudioBus header and the PCP field in
+   the VLAN tag (if present) to maximize the
+   probability that QoS-aware switches will
+   prioritize time-critical traffic.
+
+   Implementations MUST function correctly on
+   networks that provide no QoS differentiation.
+   The playout buffer (Section 10.7) provides the
+   necessary tolerance for packet delay variation
+   on best-effort networks.
 
 5.6.  Coexistence with IP Traffic
 
-   AudioBus uses EtherType 0x88B6, which is distinct
-   from IPv4 (0x0800), IPv6 (0x86DD), ARP (0x0806),
-   and all other assigned EtherTypes.
+   AudioBus uses EtherType 0x88B6, which is
+   distinct from all IANA-assigned EtherTypes
+   including IPv4 (0x0800), IPv6 (0x86DD), and
+   ARP (0x0806).  AudioBus frames are therefore
+   invisible to IP protocol stacks that filter
+   by EtherType.
 
    An implementation MUST NOT interfere with IP
-   protocol stacks on the same interface.  AudioBus
-   and IP traffic MAY share the same physical port
-   and switch infrastructure.
+   protocol stacks on the same interface.  In
+   particular:
+
+   -  AudioBus MUST NOT modify the ARP table.
+
+   -  AudioBus MUST NOT generate IGMP messages
+      (it uses Ethernet-level multicast group
+      management, not IP multicast).
+
+   -  AudioBus MUST NOT consume UDP or TCP ports.
+
+   -  AudioBus MUST NOT alter IP routing tables.
+
+   AudioBus and IP traffic MAY share the same
+   physical port and switch infrastructure.
+   On shared networks, implementations SHOULD
+   use VLAN tagging (Section 5.4) to isolate
+   AudioBus traffic when total bandwidth exceeds
+   50% of link capacity.
+
+5.7.  Bandwidth Budget
 
    Implementations MUST self-police bandwidth by
-   limiting aggregate audio packet rate to declared
-   stream parameters.  The maximum bandwidth of a
-   single stream is:
+   limiting aggregate audio packet rate to the
+   declared stream parameters.
 
-      BW_bits = (C * D * S) + (S / N) * (OH * 8)
+   The bandwidth consumed by a single audio stream
+   is computed as follows:
 
-   Where C is channels, D is bit depth, S is sample
-   rate in Hz, N is samples per packet, and OH is
-   the total per-packet overhead in octets
-   (Ethernet header + AudioBus header + audio header
-   = 14 + 12 + 20 = 46 octets).
+      N_samp  = interval_us * Fs / 1000000
+
+      P_audio = N_samp * C * (D / 8)
+
+      P_total = OH_eth + OH_ab + OH_audio + P_audio
+
+      BW_bps  = (P_total * 8) / (interval_us / 1e6)
+
+   Where:
+
+      interval_us  = packet interval in microseconds
+      Fs           = sample rate in Hz
+      C            = channel count
+      D            = bit depth in bits
+      N_samp       = samples per channel per packet
+      P_audio      = audio payload in octets
+      OH_eth       = Ethernet overhead: 14 octets
+                     (or 18 with VLAN tag)
+      OH_ab        = AudioBus common header:
+                     12 octets
+      OH_audio     = Audio packet header: 20 octets
+      P_total      = total frame payload in octets
+      BW_bps       = bandwidth in bits per second
+
+   Example: 8 channels, 32-bit, 48 kHz, 1 ms
+   interval:
+
+      N_samp  = 1000 * 48000 / 1000000 = 48
+      P_audio = 48 * 8 * 4 = 1536 octets
+
+      NOTE: This exceeds the Ethernet MTU.  The
+      implementation MUST either reduce the packet
+      interval or use fewer channels per stream.
+
+   Example: 8 channels, 32-bit, 48 kHz, 250 us:
+
+      N_samp  = 250 * 48000 / 1000000 = 12
+      P_audio = 12 * 8 * 4 = 384 octets
+      P_total = 14 + 12 + 20 + 384 = 430 octets
+      BW_bps  = (430 * 8) / 0.000250
+             = 13,760,000 bps = 13.76 Mbps
+
+   Implementations MUST verify that the total
+   bandwidth of all active streams does not
+   exceed 80% of the link capacity.  If adding
+   a new stream would exceed this limit, the
+   implementation MUST refuse the stream and
+   SHOULD report an error to the application
+   layer.
+
+   The 80% limit reserves bandwidth for
+   non-audio traffic (beacons, PTP, tunnel,
+   metadata, ping/pong) and for IP traffic
+   sharing the same link.
+
+5.8.  Switch Requirements
+
+   AudioBus operates with any IEEE 802.3-
+   compliant Layer 2 switch.  The following
+   switch features are RECOMMENDED but not
+   required:
+
+   -  IGMP snooping disabled or configured to
+      pass unknown multicast groups.  AudioBus
+      does not use IGMP; switches that drop
+      unregistered multicast groups will block
+      AudioBus traffic.  Implementations SHOULD
+      document this requirement for network
+      administrators.
+
+   -  Store-and-forward mode (as opposed to
+      cut-through) for deterministic latency.
+
+   -  Support for IEEE 802.1Q VLAN tagging.
+
+   -  Support for Priority Code Point (PCP)
+      scheduling with at least two priority
+      queues.
+
+   -  Port-based rate limiting to prevent
+      non-AudioBus traffic from starving
+      AudioBus streams.
+
+   Managed switches that support static multicast
+   group registration SHOULD be configured to
+   forward AudioBus multicast groups only to
+   ports where AudioBus nodes are connected.
+
+   AudioBus does NOT require:
+
+   -  AVB/TSN switch features (802.1AS, 802.1Qav,
+      802.1Qat, 802.1CB).
+
+   -  IGMP snooping.
+
+   -  Spanning Tree Protocol (AudioBus does not
+      use redundant paths).
+
+   -  Any Layer 3 (IP) routing capability.
 
 
 6.  LVDS Serial Transport
 
 6.1.  Physical Layer
 
-   The LVDS transport uses Low-Voltage Differential
-   Signaling conforming to TIA/EIA-644 [TIA644] over
-   a single twisted pair.
+   The LVDS transport uses Low-Voltage
+   Differential Signaling conforming to TIA/EIA-
+   644 [TIA644] over a single twisted pair.
 
-   Cable:  Category 5e or better, 100-ohm differential
-      impedance.
+   6.1.1.  Electrical Characteristics
 
-   Maximum length:  15 meters per segment at the
-      maximum line rate.
+   +---------------------------+-------------+
+   | Parameter                 | Value       |
+   +---------------------------+-------------+
+   | Differential output       |             |
+   |   voltage swing           | 250-450 mV  |
+   | Common-mode output        |             |
+   |   voltage                 | 1.125-1.375V|
+   | Differential impedance    | 100 ohms    |
+   |   (nominal)               |   +/- 10%   |
+   | Output rise/fall time     | < 1.5 ns    |
+   | Receiver input threshold  | +/- 100 mV  |
+   +---------------------------+-------------+
 
-   Termination:  Each end of the link MUST be
-      terminated with a 100-ohm differential resistor
-      placed within 10 mm of the receiver input pins.
+       Table 4: LVDS Electrical Parameters
 
-   Transceiver:  A device with separate LVDS driver
-      and receiver on the same differential pair, with
-      a driver-enable control signal, is REQUIRED.
+   6.1.2.  Cabling
+
+   Cable: Category 5e unshielded twisted pair
+      (UTP) or better, 100-ohm differential
+      impedance.  Shielded twisted pair (STP) MAY
+      be used in high-EMI environments.
+
+   Connector: The connector type is not mandated
+      by this specification.  Implementations
+      SHOULD use standard RJ45 connectors for
+      ease of deployment with commodity cabling.
+
+   Maximum segment length: 15 meters at the
+      maximum line rate (49.152 MHz symbol rate
+      for 48 kHz family).  Longer cables MAY
+      work at reduced reliability; implementations
+      SHOULD monitor CRC error rates and warn the
+      user if errors exceed one per 100,000 frames.
+
+   6.1.3.  Termination
+
+   Each end of the LVDS link MUST be terminated
+   with a 100-ohm (+/- 5%) differential resistor.
+   The resistor MUST be placed within 10 mm of
+   the receiver input pins on the circuit board.
+
+   Failure to terminate correctly results in
+   signal reflections that degrade the bit error
+   rate, particularly at segment lengths
+   approaching 15 meters.
+
+   6.1.4.  Transceiver
+
+   Each node MUST use a transceiver that provides
+   both an LVDS driver and an LVDS receiver on the
+   same differential pair, with a driver-enable
+   (DE) control signal.
+
+   When the node is receiving (not driving the
+   bus), the driver MUST be disabled (DE
+   deasserted) to present high impedance to the
+   line.
+
+   The driver-enable signal MUST respond within
+   10 nanoseconds of assertion or deassertion.
+
+   Typical parts: SN65LVDT41 (TI), MAX9113 (ADI),
+   or equivalent.
+
+   6.1.5.  Line Rate
+
+   The line rate depends on the audio sample rate
+   family and the TDM frame size:
+
+   +----------+--------+---------------------+
+   | Fs (Hz)  | Frame  | Symbol Rate (Hz)    |
+   |          | (oct)  |                     |
+   +----------+--------+---------------------+
+   | 48000    |  1024  | 48000*1024*10/8     |
+   |          |        | = 61,440,000        |
+   | 96000    |   512  | 96000*512*10/8      |
+   |          |        | = 61,440,000        |
+   | 44100    |  1024  | 44100*1024*10/8     |
+   |          |        | = 56,448,000        |
+   | 88200    |   512  | 88200*512*10/8      |
+   |          |        | = 56,448,000        |
+   +----------+--------+---------------------+
+
+       Table 5: Line Rate by Sample Rate
+
+   The 10/8 factor accounts for 8b10b encoding
+   overhead.  All rates are within the capability
+   of standard LVDS transceivers.
 
 6.2.  8b10b Line Coding
 
-   All data is encoded using the 8b10b line code
-   defined in [IEEE802.3] Clause 36.
+   All data on the LVDS link is encoded using the
+   8b10b line code defined in IEEE 802.3
+   [IEEE802.3] Clause 36.
 
-   The following K-characters are defined:
+   8b10b encoding maps each 8-bit data byte to a
+   10-bit symbol, providing DC balance and
+   guaranteed transition density for clock
+   recovery.
 
-   +--------+-------+----------------------------------+
-   | Symbol | Value | Usage                            |
-   +--------+-------+----------------------------------+
-   | K28.5  | 0xBC  | Comma (alignment, frame sync)    |
-   | K28.1  | 0x3C  | Start of Frame                   |
-   | K27.7  | 0xFB  | Direction turnaround             |
-   | K28.3  | 0x7C  | Idle                             |
-   | K29.7  | 0xFD  | End of Frame                     |
-   | K23.7  | 0xF7  | Discovery beacon                 |
-   +--------+-------+----------------------------------+
+   6.2.1.  Data Characters
 
-            Table 3: K-Character Assignments
+   Data characters (D-characters) encode payload
+   bytes.  Each D-character is denoted Dx.y where
+   x is the value of the low 5 bits and y is the
+   value of the high 3 bits.  The full encoding
+   table is defined in IEEE 802.3 Clause 36 and
+   is not reproduced here.
+
+   6.2.2.  Control Characters (K-characters)
+
+   AudioBus uses the following K-characters for
+   framing and link management:
+
+   +---------+-------+----------------------------+
+   | Symbol  | Value | Usage                      |
+   +---------+-------+----------------------------+
+   | K28.5   | 0xBC  | Comma: byte alignment      |
+   |         |       | and frame synchronization. |
+   |         |       | Also used as idle fill.    |
+   +---------+-------+----------------------------+
+   | K28.1   | 0x3C  | Start of Frame (SOF):      |
+   |         |       | marks the beginning of a   |
+   |         |       | TDM frame payload.         |
+   +---------+-------+----------------------------+
+   | K27.7   | 0xFB  | Direction Turnaround:      |
+   |         |       | signals the boundary       |
+   |         |       | between downstream and     |
+   |         |       | upstream phases.           |
+   +---------+-------+----------------------------+
+   | K28.3   | 0x7C  | Idle: transmitted during   |
+   |         |       | guard time and when the    |
+   |         |       | bus has no data to send.   |
+   +---------+-------+----------------------------+
+   | K29.7   | 0xFD  | End of Frame (EOF):        |
+   |         |       | marks the end of the TDM   |
+   |         |       | frame payload.             |
+   +---------+-------+----------------------------+
+   | K23.7   | 0xF7  | Discovery Beacon: used     |
+   |         |       | during LVDS link init to   |
+   |         |       | detect connected nodes.    |
+   +---------+-------+----------------------------+
+
+       Table 6: K-Character Assignments
+
+   6.2.3.  Running Disparity
+
+   The 8b10b encoder MUST maintain running
+   disparity (RD) as defined in IEEE 802.3
+   Clause 36.  The initial running disparity at
+   link initialization is negative (RD-).
+
+   A receiver that detects a running disparity
+   error MUST NOT discard the frame immediately
+   but MUST count the error.  If disparity errors
+   exceed 10 per second, the receiver SHOULD
+   report a link quality degradation warning to
+   the application.
+
+   6.2.4.  Comma Detection and Alignment
+
+   The receiver MUST use the K28.5 comma character
+   for byte alignment.  The unique bit pattern of
+   K28.5 (0011111 or 1100000 in the 10-bit domain)
+   cannot appear within any pair of adjacent data
+   or control symbols, guaranteeing unambiguous
+   alignment.
+
+   Upon initial link-up, the receiver MUST acquire
+   comma alignment within 10 symbol periods.
+
+   If comma alignment is lost (no K28.5 detected
+   for 100 consecutive symbols), the receiver MUST
+   declare a loss-of-sync condition, discard all
+   data until alignment is reacquired, and
+   increment a "sync loss" counter.
 
 6.3.  TDM Frame Structure
 
-   One frame is transmitted per audio sample period:
+   In LVDS mode, one TDM frame is transmitted per
+   audio sample period.  The frame carries audio
+   samples, tunnel data, and sideband information
+   for all nodes in the daisy chain.
 
-   +------+--------+------------------------------+
-   | Byte | Length | Field                        |
-   +------+--------+------------------------------+
-   |    0 |      1 | K28.5 (Comma)                |
-   |    1 |      1 | K28.1 (Start of Frame)       |
-   |    2 |      8 | Frame Header (Section 6.4)   |
-   |   10 |      1 | Downstream Sideband          |
-   |   11 |    var | Downstream Audio Slots        |
-   |      |    var | Downstream Aux Data           |
-   |      |      2 | Guard (K28.5 + K27.7)        |
-   |      |      1 | Upstream Sideband            |
-   |      |    var | Upstream Audio Slots          |
-   |      |    var | Upstream Aux Data             |
-   |  F-4 |      4 | CRC-32                       |
-   +------+--------+------------------------------+
+   Frame sizes are fixed for each sample rate
+   family:
 
-            Table 4: TDM Frame Layout
+   -  1024 octets for 48000 Hz and 44100 Hz.
+   -   512 octets for 96000 Hz and 88200 Hz.
 
-   Frame sizes:
+   The frame structure is as follows:
 
-   -  1024 octets at 48000 or 44100 Hz
-   -   512 octets at 96000 or 88200 Hz
+   +------+--------+----------------------------+
+   | Byte | Length | Field                      |
+   +------+--------+----------------------------+
+   |    0 |      1 | K28.5 (Comma)              |
+   |    1 |      1 | K28.1 (Start of Frame)     |
+   |    2 |      8 | Frame Header (Sec 6.4)     |
+   |   10 |      1 | Downstream Sideband        |
+   |   11 |   var  | Downstream Audio Slots     |
+   |      |   var  | Downstream Aux Data        |
+   |      |      1 | K28.5 (Guard preamble)     |
+   |      |      1 | K27.7 (Turnaround)         |
+   |      |   var  | K28.3 (Guard idle fill)    |
+   |      |      1 | Upstream Sideband          |
+   |      |   var  | Upstream Audio Slots       |
+   |      |   var  | Upstream Aux Data          |
+   | F-5  |      1 | K29.7 (End of Frame)       |
+   | F-4  |      4 | CRC-32                     |
+   +------+--------+----------------------------+
 
-   Parallel clock frequencies:
+       Table 7: TDM Frame Layout
+       (F = frame size in octets)
 
-   -  49,152,000 Hz for 48 kHz family
-   -  45,158,400 Hz for 44.1 kHz family
+         Figure 8: TDM Frame Structure
+
+   6.3.1.  Downstream Phase
+
+   The downstream phase begins immediately after
+   the frame header and carries data from the
+   master to all slaves.  It contains:
+
+   -  Downstream Sideband: 1 octet of sideband
+      control data (used for slot map distribution,
+      status polling, and similar management
+      functions as described in Section 11.6).
+
+   -  Downstream Audio Slots: audio sample data
+      for channels originating at the master,
+      packed contiguously according to the slot
+      map (Section 6.5).
+
+   -  Downstream Aux Data: tunnel and metadata
+      payloads destined for slaves, formatted as
+      AudioBus packets with the common header.
+
+   6.3.2.  Guard
+
+   The guard separates the downstream and upstream
+   phases.  It consists of:
+
+   -  K28.5: one comma symbol to re-establish
+      byte alignment at the receiver.
+
+   -  K27.7: one direction turnaround symbol
+      signaling the transition.
+
+   -  K28.3 (repeated): idle fill symbols for
+      CDR re-lock.  The number of idle symbols
+      is:
+
+         N_idle = ceil(T_guard * F_sym / 10) - 2
+
+      where T_guard is the guard time in seconds
+      (minimum 650 ns, corresponding to 32 symbol
+      periods at 61.44 MHz), and F_sym is the
+      symbol rate in Hz.  The "-2" accounts for
+      the K28.5 and K27.7 symbols.
+
+      At the minimum guard time of 650 ns:
+
+         N_idle = ceil(650e-9 * 61440000 / 10) - 2
+                = ceil(4.0) - 2
+                = 2
+
+      Total guard overhead: 4 symbols = 4 octets
+      (after 8b10b decoding).
+
+   6.3.3.  Upstream Phase
+
+   The upstream phase carries data from slaves to
+   the master.  Its structure mirrors the
+   downstream phase:
+
+   -  Upstream Sideband: 1 octet.
+   -  Upstream Audio Slots: audio data from slave
+      nodes.
+   -  Upstream Aux Data: tunnel and metadata
+      payloads from slaves.
+
+   6.3.4.  Frame Capacity Calculation
+
+   The available capacity for audio and aux data
+   within a single TDM frame is:
+
+      C_total = F - OH_fixed
+
+   where F is the frame size (1024 or 512 octets)
+   and OH_fixed is the sum of all fixed-size
+   fields:
+
+      OH_fixed = 1 (K28.5)
+               + 1 (K28.1)
+               + 8 (frame header)
+               + 1 (downstream sideband)
+               + 4 (guard: K28.5+K27.7+2*K28.3)
+               + 1 (upstream sideband)
+               + 1 (K29.7)
+               + 4 (CRC-32)
+               = 21 octets
+
+   Therefore:
+
+      C_total(1024) = 1024 - 21 = 1003 octets
+      C_total(512)  =  512 - 21 =  491 octets
+
+   This capacity is split between downstream and
+   upstream audio and aux data, as determined by
+   the slot map.
+
+   At 32-bit depth, each channel requires 4 octets
+   per sample.  The maximum channel count for
+   symmetric (equal up/down) allocation:
+
+      Ch_max(1024) = floor(1003 / 2 / 4) = 125
+      Ch_max(512)  = floor( 491 / 2 / 4) =  61
+
+   These exceed the protocol maximum of 64
+   channels per direction, so the 64-channel
+   limit is enforced by the protocol, not the
+   frame capacity.
+
+   ABNF for TDM frame:
+
+   tdm-frame   = comma sof frame-hdr
+                  dn-sideband dn-audio dn-aux
+                  guard
+                  up-sideband up-audio up-aux
+                  eof crc32
+
+   comma        = %xBC        ; K28.5
+   sof          = %x3C        ; K28.1
+   frame-hdr    = 8OCTET      ; Section 6.4
+   dn-sideband  = OCTET
+   dn-audio     = *OCTET      ; per slot map
+   dn-aux       = *OCTET      ; per slot map
+   guard        = %xBC %xFB *(%x7C)
+                  ; K28.5, K27.7, K28.3...
+   up-sideband  = OCTET
+   up-audio     = *OCTET      ; per slot map
+   up-aux       = *OCTET      ; per slot map
+   eof          = %xFD        ; K29.7
+   crc32        = 4OCTET
+
+      Figure 9: ABNF for TDM Frame
 
 6.4.  Frame Header
+
+   The 8-octet LVDS frame header follows the
+   Start-of-Frame (K28.1) symbol and precedes all
+   audio and auxiliary data.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -648,150 +2254,978 @@ Table of Contents
    |  Node Count   |DN Audio Slots |UP Audio Slots | SlotMap CRC   |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 4: LVDS Frame Header
+           Figure 10: LVDS Frame Header
 
-   Frame Counter:  16 bits.  Monotonically increasing.
+   The following paragraphs describe each field.
 
-   Frame Type:  8 bits.
-      0x00 = Normal, 0x01 = Discovery,
-      0x02 = Configuration, 0x03 = Status.
+   Frame Counter (octets 0-1):
 
-   Flags:  8 bits.
-      Bits 0-1:  Sample rate (0=48k, 1=96k,
-         2=44.1k, 3=88.2k).
-      Bits 2-3:  Bit depth (0=16, 1=24, 2=32).
-      Bit 4:  Sideband valid.
-      Bits 5-7:  Reserved.  MUST be zero.
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+      Default: 0 at power-on; increments by 1
+         for each frame.
 
-   Node Count:  8 bits.  Active nodes in chain.
+      A monotonically increasing counter that
+      wraps from 65535 to 0.  The master
+      increments this counter for each TDM frame
+      it initiates.
 
-   DN/UP Audio Slots:  8 bits each.  Slot counts.
+      Slaves MUST NOT modify the Frame Counter.
 
-   SlotMap CRC:  8 bits.  CRC-8 of the active
-      slot map for configuration verification.
+      Slaves use the Frame Counter to detect
+      missed frames.  A gap in the counter
+      indicates one or more frames were lost.
+      On detection of a gap, the slave MUST
+      substitute silence for the missing audio
+      samples and increment a "frame loss"
+      counter.
+
+   Frame Type (octet 2):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0x00 to 0x03.
+      Default: 0x00 (Normal).
+
+      Identifies the purpose of this frame:
+
+      0x00 - Normal: contains audio and/or
+         auxiliary data per the active slot map.
+
+      0x01 - Discovery: transmitted by the master
+         during link initialization to detect
+         connected slaves.  Slaves receiving a
+         Discovery frame MUST respond with their
+         Node UID in the upstream sideband.
+
+      0x02 - Configuration: carries a new slot
+         map from the master to all slaves.
+         Slaves MUST store the new slot map and
+         apply it beginning with the next Normal
+         frame.
+
+      0x03 - Status: requests status information
+         from all slaves.  Each slave inserts its
+         status byte in the upstream sideband at
+         its assigned slot.
+
+      Values 0x04 through 0xFF are reserved.  A
+      slave that receives a frame with an
+      unrecognized Frame Type MUST forward the
+      frame unchanged and MUST NOT insert any
+      upstream data.
+
+   Flags (octet 3):
+
+      Type: 8-bit bitfield.
+      Size: 1 octet.
+      Default: 0x00.
+
+      Bits 0-1 (0xC0): Sample Rate Index.
+
+         Encodes the active sample rate:
+         0 = 48000 Hz, 1 = 96000 Hz,
+         2 = 44100 Hz, 3 = 88200 Hz.
+
+         A slave MUST verify that the Sample Rate
+         Index matches its own configuration.
+         If it does not match, the slave MUST NOT
+         insert audio data and MUST set an error
+         flag in the upstream sideband.
+
+      Bits 2-3 (0x30): Bit Depth Index.
+
+         Encodes the active bit depth:
+         0 = 16 bits, 1 = 24 bits, 2 = 32 bits.
+         Value 3 is reserved and MUST NOT be
+         transmitted.
+
+         A slave that receives Bit Depth Index 3
+         MUST treat it as a configuration error
+         and MUST NOT insert audio data.
+
+      Bit 4 (0x08): Sideband Valid.
+
+         Set to 1 if the downstream sideband
+         octet contains valid management data.
+         Set to 0 if the sideband is unused
+         (fill value 0x00).
+
+         Slaves MUST ignore the sideband octet
+         if this bit is 0.
+
+      Bits 5-7 (0x07): Reserved.
+
+         MUST be 0 on transmit.  Slaves MUST
+         ignore these bits.
+
+   Node Count (octet 4):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 1 to 16.
+      Default: 1 (master only).
+
+      The number of active nodes in the chain,
+      including the master.  The master sets this
+      field based on the most recent discovery.
+
+      A slave whose node ID exceeds
+      (Node Count - 1) MUST NOT insert any data
+      into the frame.
+
+      If Node Count is 0, the slave MUST discard
+      the frame and log an error.
+
+   DN Audio Slots (octet 5):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0 to 255.
+      Default: 0.
+
+      The number of audio channel slots in the
+      downstream phase.  Each slot occupies
+      (bit_depth / 8) octets.  The total
+      downstream audio region is:
+
+         DN_bytes = DN_Audio_Slots * (D / 8)
+
+      where D is the bit depth in bits.
+
+      If this value is inconsistent with the slot
+      map (i.e., the computed size does not match
+      the slot map entries), the slave MUST ignore
+      all downstream audio and set an error flag.
+
+   UP Audio Slots (octet 6):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0 to 255.
+      Default: 0.
+
+      The number of audio channel slots in the
+      upstream phase.  Semantics mirror
+      DN Audio Slots.
+
+   SlotMap CRC (octet 7):
+
+      Type: unsigned 8-bit integer (CRC-8).
+      Size: 1 octet.
+      Valid range: 0x00 to 0xFF.
+      Default: 0x00 (no slot map configured).
+
+      The CRC-8 computed over the active slot map
+      using polynomial 0x07:
+
+         G(x) = x^8 + x^2 + x + 1
+
+      The CRC is initialized to 0x00, computed
+      over each octet of the slot map table in
+      the order it was distributed during the
+      most recent Configuration frame.
+
+      Slaves MUST compare this CRC to their
+      locally stored slot map CRC.  If the values
+      differ, the slave MUST request
+      reconfiguration by setting the appropriate
+      error flag in the upstream sideband and
+      MUST NOT insert audio data until the CRC
+      matches.
+
+      A SlotMap CRC of 0x00 when Node Count > 1
+      indicates that no slot map has been
+      distributed yet.  Slaves MUST NOT insert
+      audio data in this state.
+
+   ABNF for frame header:
+
+   frame-hdr     = frame-counter frame-type
+                   frame-flags node-count
+                   dn-audio-slots up-audio-slots
+                   slotmap-crc
+
+   frame-counter  = uint16
+   frame-type     = uint8
+   frame-flags    = uint8
+   node-count     = uint8
+   dn-audio-slots = uint8
+   up-audio-slots = uint8
+   slotmap-crc    = uint8
+
+      Figure 11: ABNF for LVDS Frame Header
 
 6.5.  Slot Map
 
-   The slot map assigns byte offsets within the frame
-   to audio channels and tunnel streams.  It is
-   computed by the master during configuration and
-   distributed to all slaves.
+   The slot map is a table that assigns byte
+   offsets within the TDM frame to audio channels
+   and tunnel streams for each node in the chain.
+   It is computed by the bus master during the
+   configuration phase and distributed to all
+   slaves via Configuration frames (Frame Type
+   0x02).
 
-   The slot map MUST NOT change during operation.
-   Reconfiguration requires the master to re-enter
-   the configuration state.
+   6.5.1.  Slot Map Entry Format
 
-   Each audio slot specifies:
+   Each entry in the slot map is 6 octets:
 
-   -  Byte offset within frame (16 bits)
-   -  Byte width: 2, 3, or 4 (8 bits)
-   -  Logical channel ID: 0-127 (8 bits)
-   -  Owning node ID (8 bits)
-   -  Direction: 0=downstream, 1=upstream (8 bits)
+    0                   1                   2
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |        Byte Offset            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |  Byte Width   |  Channel ID   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |   Node ID     |  Direction    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-   The packing algorithm:
+      Figure 12: Slot Map Entry
 
-   1.  For each node in ID order, allocate downstream
-       audio channels.
-   2.  Allocate downstream tunnel bandwidth.
-   3.  Insert guard.
-   4.  For each node in ID order, allocate upstream
-       audio channels.
-   5.  Allocate upstream tunnel bandwidth.
-   6.  Verify total does not exceed frame size
-       minus 4 (CRC).
-   7.  Compute CRC-8 over the slot map.
+   Byte Offset (octets 0-1):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 10 to (F - 5), where F is the
+         frame size.
+
+      The byte offset within the TDM frame where
+      this slot's data begins.  The offset is
+      relative to the start of the frame (byte 0
+      is the K28.5 comma).
+
+      Offsets 0 through 9 are occupied by the
+      comma, SOF, and frame header, and MUST NOT
+      be used for audio slots.  Offsets from
+      (F - 4) through (F - 1) are occupied by
+      the CRC-32, and MUST NOT be used.
+
+   Byte Width (octet 2):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 2, 3, or 4.
+      Default: determined by the bit depth.
+
+      The number of octets occupied by one audio
+      sample in this slot: 2 for 16-bit, 3 for
+      24-bit, 4 for 32-bit audio.
+
+      If the Byte Width does not match the
+      bit depth indicated in the frame header
+      Flags field, the slot is invalid.  The
+      slave MUST NOT read or write data for
+      invalid slots and MUST report the error.
+
+   Channel ID (octet 3):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0 to 127.
+      Default: 0.
+
+      The logical channel identifier.  Channel
+      IDs 0 through 63 correspond to audio
+      channels.  Channel IDs 64 through 127 are
+      reserved for tunnel data slots.
+
+      The Channel ID is unique within the scope
+      of (Node ID, Direction).
+
+   Node ID (octet 4):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0 to 15.
+      Default: 0 (master).
+
+      The node that owns this slot.  In the
+      downstream direction, the master (Node
+      ID 0) writes to slots it owns; slaves
+      read from them.  In the upstream direction,
+      the slave writes to slots it owns; the
+      master reads from them.
+
+   Direction (octet 5):
+
+      Type: unsigned 8-bit integer.
+      Size: 1 octet.
+      Valid range: 0 or 1.
+      Default: 0.
+
+      0 = downstream (master to slaves).
+      1 = upstream (slaves to master).
+
+      A value other than 0 or 1 is invalid.  A
+      slave receiving an invalid Direction MUST
+      ignore the slot entry and report an error.
+
+   6.5.2.  Slot Map Distribution
+
+   The master distributes the slot map using
+   Configuration frames (Frame Type 0x02).  The
+   slot map entries are placed in the downstream
+   audio and aux data region, serialized
+   contiguously.
+
+   Because the slot map may exceed the available
+   space in a single frame, the master MAY
+   fragment it across multiple consecutive
+   Configuration frames.  The master MUST set
+   the Sideband Valid flag (bit 4) and encode
+   the following in the downstream sideband octet:
+
+   -  Bits 0-3: fragment index (0 = first).
+   -  Bits 4-7: total fragment count.
+
+   A slave MUST buffer all fragments and assemble
+   the complete slot map before applying it.
+
+   The master MUST transmit the complete slot map
+   at least twice to ensure all slaves receive
+   it (in case of transient errors on the first
+   transmission).
+
+   6.5.3.  Slot Map Computation Algorithm
+
+   The master computes the slot map as follows:
+
+   1.  Sort nodes by Node ID (ascending).
+
+   2.  For each node, collect the number of
+       downstream and upstream audio channels it
+       requires (obtained during discovery).
+
+   3.  Set offset = 11 (first byte after
+       downstream sideband).
+
+   4.  For each node in order, allocate
+       downstream audio slots:
+
+       For each channel c from 0 to (N_dn - 1):
+          Create entry: offset, byte_width,
+             c, node_id, 0 (downstream).
+          offset += byte_width.
+
+   5.  Allocate downstream aux data region
+       (if needed):
+
+       Record dn_aux_offset = offset.
+       offset += dn_aux_size.
+
+   6.  Insert guard:
+
+       Record guard_offset = offset.
+       offset += guard_size (minimum 4 octets).
+
+   7.  Allocate upstream sideband:
+
+       Record up_sideband_offset = offset.
+       offset += 1.
+
+   8.  For each node in order, allocate upstream
+       audio slots:
+
+       For each channel c from 0 to (N_up - 1):
+          Create entry: offset, byte_width,
+             c, node_id, 1 (upstream).
+          offset += byte_width.
+
+   9.  Allocate upstream aux data region:
+
+       Record up_aux_offset = offset.
+       offset += up_aux_size.
+
+   10. Verify: offset + 1 (EOF) + 4 (CRC) <= F.
+
+       If not, reduce channel counts or aux data
+       allocation and repeat from step 3.
+
+   11. Compute CRC-8 over the serialized slot map
+       table.
+
+   ABNF for slot map:
+
+   slot-map      = *slot-entry
+
+   slot-entry    = byte-offset byte-width
+                   channel-id node-id direction
+
+   byte-offset   = uint16
+   byte-width    = uint8    ; 2, 3, or 4
+   channel-id    = uint8    ; 0..127
+   node-id       = uint8    ; 0..15
+   direction     = uint8    ; 0 or 1
+
+      Figure 13: ABNF for Slot Map
 
 6.6.  Half-Duplex Operation
 
-   The link is half-duplex on a single pair.  The
-   downstream phase precedes the upstream phase
-   within each frame.
+   The LVDS link is half-duplex on a single
+   twisted pair.  Within each TDM frame, the
+   downstream phase precedes the upstream phase.
 
-   Direction change is signaled by K28.5 followed
-   by K27.7.
+   6.6.1.  Direction Change Sequence
 
-   After the guard sequence, the transmitter MUST
-   disable its LVDS driver within 10 nanoseconds.
-   The new transmitter MUST NOT enable its driver
-   until a minimum of 650 nanoseconds (32 symbol
-   periods) have elapsed, to allow CDR re-lock at
-   the receiver.
+   The transition from downstream to upstream is
+   signaled by the following sequence:
 
-   Failure to observe the guard time may result in
-   bit errors in the first symbols of the new
-   direction.  Implementations SHOULD monitor CRC
-   errors and increase guard time if the error rate
-   exceeds one per 10,000 frames.
+   1.  The master (or current transmitter in the
+       downstream direction) transmits K28.5
+       (comma).
+
+   2.  Immediately following, it transmits K27.7
+       (direction turnaround).
+
+   3.  The transmitter MUST disable its LVDS
+       driver within 10 nanoseconds of completing
+       the K27.7 symbol transmission.
+
+   4.  All transmitters remain idle for the
+       guard time.  During this period, the
+       bus is undriven (high impedance).
+
+   5.  The first upstream transmitter (the slave
+       at the end of the chain) enables its
+       driver and begins transmitting K28.3 idle
+       fill for at least 2 symbols, followed by
+       upstream data.
+
+   6.6.2.  Guard Time
+
+   The minimum guard time is 650 nanoseconds,
+   corresponding to 32 symbol periods at the
+   61.44 MHz symbol rate.  This time allows the
+   clock and data recovery (CDR) circuit at each
+   receiver to re-acquire lock on the new
+   transmitter's signal.
+
+   The guard time formula is:
+
+      T_guard = N_guard * T_sym
+
+   where N_guard is the number of guard symbols
+   (minimum 32, including K28.5, K27.7, and
+   K28.3 fills) and T_sym is the symbol period:
+
+      T_sym = 1 / F_sym
+
+   At 61.44 MHz:
+
+      T_sym   = 16.276 ns
+      T_guard = 32 * 16.276 ns = 520.8 ns
+
+   Rounded up to the minimum of 650 ns, the
+   guard is 40 symbol periods.
+
+   Implementations SHOULD monitor CRC error rates
+   after direction changes.  If the error rate
+   exceeds 1 per 10,000 frames, the
+   implementation SHOULD increase the guard time
+   by 8 symbol periods and re-evaluate.
+
+   6.6.3.  Bus Turnaround Timing
+
+   Transmitter                 Receiver
+      |                           |
+      |  [K28.5] [K27.7]         |
+      |                           |
+      |  driver OFF               |
+      |      (<10 ns)             |
+      |                           |
+      |  === guard time ===       |
+      |  (min 650 ns / 40 sym)   |
+      |                           |
+      |         new TX driver ON  |
+      |         [K28.3] [K28.3]  |
+      |         [upstream data]  |
+      |                           |
+
+      Figure 14: Bus Turnaround Timing
 
 6.7.  Daisy-Chain Forwarding
 
-   Nodes connect in a chain:
+   Nodes in an LVDS chain connect as follows:
 
-      Master <-> Node 1 <-> Node 2 <-> ... <-> Node N
+     Master <-> Node 1 <-> Node 2 <-> ... <-> N
 
-   Each intermediate node receives the frame, extracts
-   assigned channels, inserts upstream data, and
-   retransmits.  This store-and-forward operation adds
-   one frame period of latency per hop.
+   Each intermediate node performs store-and-
+   forward: it receives the entire downstream
+   phase, extracts its assigned channels, inserts
+   upstream data in the appropriate slots, and
+   retransmits the frame to the next node.
 
-   Total round-trip latency for H hops at sample rate
-   Fs:
+   6.7.1.  Forwarding Latency
 
-      RTT = 2 * H * (1 / Fs)
+   Each hop adds one frame period of latency in
+   each direction:
 
-   Example: 8 nodes at 48 kHz = 333 microseconds.
+      L_hop = 1 / Fs
+
+   At 48 kHz, L_hop = 20.833 microseconds.
+
+   The total one-way latency for H hops is:
+
+      L_oneway = H * L_hop = H / Fs
+
+   The total round-trip latency is:
+
+      L_rtt = 2 * H / Fs
+
+   Examples:
+
+   +------+--------+----------+-----------+
+   | Hops | Fs     | One-Way  | Round-Trip|
+   |      | (Hz)   | (us)     | (us)      |
+   +------+--------+----------+-----------+
+   |    1 | 48000  |    20.83 |     41.67 |
+   |    4 | 48000  |    83.33 |    166.67 |
+   |    8 | 48000  |   166.67 |    333.33 |
+   |   15 | 48000  |   312.50 |    625.00 |
+   |    1 | 96000  |    10.42 |     20.83 |
+   |    8 | 96000  |    83.33 |    166.67 |
+   +------+--------+----------+-----------+
+
+      Table 8: Daisy-Chain Latency
+
+   6.7.2.  Forwarding Rules
+
+   An intermediate slave MUST:
+
+   -  Retransmit the downstream phase verbatim to
+      the next node, including all audio slots,
+      aux data, and the guard sequence.
+
+   -  Extract its own audio channels from the
+      downstream audio region (as identified by
+      the slot map) during retransmission.
+
+   -  Insert its upstream audio data into the
+      correct slots (as identified by the slot
+      map) during the upstream phase.
+
+   -  NOT modify any fields in the frame header.
+
+   -  NOT modify any audio slots belonging to
+      other nodes.
+
+   -  Retransmit the upstream phase from
+      downstream nodes verbatim.
+
+   The last node in the chain (Node N) does not
+   retransmit downstream.  It receives the
+   downstream phase, extracts its channels, then
+   initiates the upstream phase after the guard
+   time.
+
+   6.7.3.  Chain Break Detection
+
+   If a slave fails to receive a valid frame
+   within 10 consecutive frame periods
+   (10 / Fs seconds), it MUST:
+
+   -  Declare a "chain break" condition.
+   -  Cease all audio output (mute).
+   -  Transition to the DOWN state
+      (Section 3.5).
+
+   The master detects a downstream chain break by
+   not receiving upstream data from one or more
+   expected slaves within 10 frame periods.  The
+   master MUST then re-run discovery to determine
+   which nodes remain reachable.
+
+6.8.  LVDS Node State Machine
+
+   LVDS nodes follow the general lifecycle
+   described in Section 3.5 with the following
+   LVDS-specific substates:
+
+   Master:
+
+     IDLE -> DISCOVERY -> CONFIG -> RUNNING
+
+   Slave:
+
+     IDLE -> WAIT_FRAME -> SYNCED -> RUNNING
+
+                   +----------+
+                   |   IDLE   |
+                   +----+-----+
+                        |
+               line rate locked
+                        |
+            +-----------+-----------+
+            |                       |
+         [Master]               [Slave]
+            |                       |
+            v                       v
+      +----------+           +------------+
+      | DISCOVERY|           | WAIT_FRAME |
+      +----+-----+           +-----+------+
+           |                       |
+      all nodes found       valid frame rcvd
+           |                       |
+           v                       v
+      +----------+           +----------+
+      | CONFIG   |           | SYNCED   |
+      +----+-----+           +-----+----+
+           |                       |
+      slot map sent         slot map valid
+           |                       |
+           v                       v
+      +----------+           +----------+
+      | RUNNING  |           | RUNNING  |
+      +----+-----+           +-----+----+
+           |                       |
+      chain break            frame loss
+      or shutdown            or shutdown
+           |                       |
+           v                       v
+      +----------+           +----------+
+      |   IDLE   |           |   IDLE   |
+      +----------+           +----------+
+
+   Figure 15: LVDS Node State Machine
+
+   IDLE:  The node has powered on but has not yet
+      locked to the line rate.  The master
+      transmits K28.5 commas continuously.  The
+      slave listens for commas.
+
+   DISCOVERY (master only):  The master transmits
+      Discovery frames (Frame Type 0x01) and
+      listens for slave responses in the upstream
+      sideband.  Discovery continues for at least
+      100 ms or until no new slaves are detected
+      for 3 consecutive frames.
+
+   WAIT_FRAME (slave only):  The slave has
+      achieved comma alignment and is waiting for
+      the first valid frame (correct K28.1 SOF
+      and valid CRC).
+
+   CONFIG (master only):  The master computes the
+      slot map (Section 6.5.3) and distributes it
+      via Configuration frames.
+
+   SYNCED (slave only):  The slave has received
+      and validated the slot map (SlotMap CRC
+      matches).
+
+   RUNNING:  Normal operation.  Audio and auxiliary
+      data flow per the slot map.
+
+6.9.  Error Detection
+
+   6.9.1.  CRC-32
+
+   Each TDM frame carries a CRC-32 in its last
+   4 octets.  The CRC is computed over all octets
+   from the frame header (byte 2) through the
+   last data octet before the CRC field.
+
+   CRC polynomial: 0x04C11DB7
+
+      G(x) = x^32 + x^26 + x^23 + x^22 + x^16
+           + x^12 + x^11 + x^10 + x^8  + x^7
+           + x^5  + x^4  + x^2  + x    + 1
+
+   Initial value: 0xFFFFFFFF.
+   Final XOR: 0xFFFFFFFF.
+   Bit order: MSB first.
+
+   This is identical to the CRC used by IEEE
+   802.3 for the Frame Check Sequence.
+
+   A receiver that detects a CRC mismatch MUST
+   discard the entire frame, substitute silence
+   for all audio channels, and increment a
+   "CRC error" counter.
+
+   6.9.2.  8b10b Code Violations
+
+   A code violation occurs when a received 10-bit
+   symbol does not correspond to any valid 8b10b
+   data or control character.
+
+   On detection of a code violation, the receiver
+   MUST:
+
+   -  Discard the current frame.
+   -  Increment a "code violation" counter.
+   -  Attempt to re-align using the next K28.5
+      comma.
+
+   6.9.3.  Running Disparity Errors
+
+   A running disparity error occurs when the
+   received symbol has the correct encoding but
+   the wrong disparity (positive instead of
+   negative or vice versa).
+
+   Running disparity errors are less severe than
+   code violations.  The receiver SHOULD count
+   them but SHOULD NOT discard the frame unless
+   the CRC also fails.
+
+   6.9.4.  Frame Counter Gaps
+
+   A gap in the Frame Counter (Section 6.4)
+   indicates one or more frames were lost in
+   transit.  The slave MUST:
+
+   -  Substitute silence for all audio channels
+      during the missing frame period(s).
+   -  Increment a "frame loss" counter.
+   -  Report the gap to the application layer.
 
 
 7.  Clock Synchronization
 
 7.1.  PTP Profile
 
-   AudioBus defines a PTP profile based on
-   IEEE 1588-2019 [IEEE1588].
+   AudioBus defines a constrained Precision Time
+   Protocol (PTP) profile based on IEEE 1588-2019
+   [IEEE1588].  This profile operates within the
+   AudioBus packet encapsulation (using the
+   AudioBus common header and PTP-specific packet
+   types) and does not interoperate with standard
+   PTP profiles or gPTP (IEEE 802.1AS).
 
-   +-----------------------------+---------------------------+
-   | Parameter                   | Value                     |
-   +-----------------------------+---------------------------+
-   | Transport                   | IEEE 802.3 (Layer 2)      |
-   | Delay mechanism             | End-to-End                |
-   | Sync interval               | 125 ms                    |
-   | Delay_Req interval          | 500 ms                    |
-   | Clock domain                | 0                         |
-   | Operation mode              | Two-step                  |
-   | Hardware timestamping       | REQUIRED                  |
-   | Target accuracy             | < 1 microsecond           |
-   +-----------------------------+---------------------------+
+   7.1.1.  Profile Parameters
 
-            Table 5: PTP Profile Parameters
+   +-------------------------------+--------------+
+   | Parameter                     | Value        |
+   +-------------------------------+--------------+
+   | Transport                     | AudioBus     |
+   |                               | over IEEE    |
+   |                               | 802.3 (L2)   |
+   | Delay mechanism               | End-to-End   |
+   | Operation mode                | Two-step     |
+   | Clock domain                  | 0            |
+   | Sync interval                 | 125 ms       |
+   | Follow_Up interval            | (immediate)  |
+   | Delay_Req interval            | 500 ms       |
+   | Announce interval             | (via BEACON) |
+   | Priority1                     | N/A          |
+   | Priority2                     | 1-255        |
+   |                               | (default 128)|
+   | Clock class                   | 6, 13,       |
+   |                               | or 248       |
+   | Hardware timestamping         | REQUIRED     |
+   | Timestamp resolution          | <= 10 ns     |
+   | Target accuracy               | < 1 us       |
+   | Maximum path asymmetry        | < 100 ns     |
+   | Multicast address             | See Sec 5.3  |
+   +-------------------------------+--------------+
+
+       Table 9: PTP Profile Parameters
+
+   7.1.2.  Differences from Default PTP Profile
+
+   The AudioBus PTP profile differs from the
+   IEEE 1588 default profile in the following
+   ways:
+
+   -  Transport: AudioBus packets over Ethernet
+      L2 (not UDP/IPv4 or UDP/IPv6).
+
+   -  Encapsulation: AudioBus common header
+      (Section 4.1) instead of PTP header.
+
+   -  Announce messages: not used.  Grandmaster
+      election parameters are carried in BEACON
+      packets (Section 8.1).
+
+   -  Domain: fixed at 0.  Multi-domain
+      operation is not supported.
+
+   -  Sync interval: fixed at 125 ms (log
+      interval -3 in PTP terms is 125 ms when
+      base is 1 second; here the value is
+      specified directly in milliseconds).
+
+   -  One-step mode: not supported.  Two-step
+      mode is REQUIRED.
+
+   -  Peer-to-peer delay: not supported.  Only
+      end-to-end delay measurement is used.
+
+   7.1.3.  PTP in LVDS Mode
+
+   In LVDS mode, clock synchronization is
+   inherent: the bus master's clock directly
+   drives the frame timing.  Slaves recover the
+   clock from the incoming data stream using their
+   CDR circuitry.
+
+   PTP messages are NOT transmitted on the LVDS
+   link.  The LVDS frame timing IS the clock
+   reference.  See Section 7.11 for details.
 
 7.2.  Grandmaster Election
 
-   The grandmaster is elected using the Best Master
-   Clock (BMC) algorithm.  Comparison criteria in
-   priority order:
+   The grandmaster (GM) is elected using the
+   Best Master Clock (BMC) algorithm.  The BMC
+   comparison is performed by every node
+   independently, using information from received
+   BEACON packets (Section 8.1).
 
-   1.  Clock Class: lower wins.
-       -  6:  Locked to external reference.
-       -  13: Application-specific.
-       -  248: Free-running (default).
+   7.2.1.  Comparison Criteria
 
-   2.  Priority: lower wins.  Range 1-255.
+   The BMC algorithm compares candidates using
+   the following criteria, in strict priority
+   order:
+
+   1.  Clock Class (lower value wins):
+
+       -  6: The node's clock is locked to an
+          external reference (e.g., GPS receiver,
+          atomic clock, word clock input from a
+          trusted source).
+
+       -  13: Application-specific clock source,
+          better than free-running but not
+          traceable to a primary reference.
+
+       -  248: Free-running local oscillator
+          (default for nodes without external
+          reference).
+
+       If two candidates have different Clock
+       Class values, the one with the lower
+       value wins.
+
+   2.  Priority (lower value wins):
+
+       An 8-bit unsigned integer, range 1 to 255.
        Default: 128.
 
-   3.  Node UID: lower wins (tiebreaker).
+       This field allows system integrators to
+       influence grandmaster election without
+       requiring an external clock reference.  A
+       node with Priority 1 is strongly preferred
+       over one with Priority 128.
 
-   When the grandmaster is unreachable for 3
-   consecutive Sync intervals (375 ms), all nodes
-   MUST re-run BMC.  The winning node MUST begin
-   Sync transmission within one Sync interval.
+       The value 0 is reserved and MUST NOT be
+       used.
 
-   If all remaining nodes have Clock Class 248
-   (free-running), the node with the lowest UID
-   becomes grandmaster.  There MUST always be
-   exactly one grandmaster.
+       If two candidates have equal Clock Class
+       but different Priority values, the one
+       with the lower Priority wins.
+
+   3.  Node UID (lower value wins):
+
+       If Clock Class and Priority are both
+       equal, the node with the numerically
+       lowest Node UID wins.  This is a
+       deterministic tiebreaker that guarantees
+       exactly one grandmaster is elected.
+
+   7.2.2.  Election Procedure
+
+   1.  Each node maintains a table of all known
+       nodes and their (Clock Class, Priority,
+       Node UID) tuples, obtained from received
+       BEACON packets.
+
+   2.  Each node independently evaluates the BMC
+       comparison for all entries in its table,
+       including its own entry.
+
+   3.  The winning node is the grandmaster.
+
+   4.  If a node determines that it is the
+       grandmaster, it MUST begin transmitting
+       PTP_SYNC packets at the Sync interval
+       (125 ms) within one Sync interval of the
+       determination.
+
+   5.  If a node determines that another node is
+       the grandmaster, it MUST synchronize its
+       clock to that grandmaster using the
+       Sync/Follow_Up and Delay_Req/Delay_Resp
+       exchanges described in Sections 7.3
+       through 7.6.
+
+   6.  A node MUST NOT transmit PTP_SYNC or
+       PTP_FOLLOW_UP packets unless it is the
+       current grandmaster.
+
+   7.2.3.  Grandmaster Loss
+
+   A node MUST declare grandmaster loss if it has
+   not received a PTP_SYNC packet from the current
+   grandmaster for 3 consecutive Sync intervals
+   (375 ms).
+
+   Upon grandmaster loss:
+
+   1.  The node removes the former grandmaster
+       from its node table (if no BEACON has been
+       received within the node expiry timeout).
+
+   2.  The node re-runs the BMC algorithm over
+       all remaining entries.
+
+   3.  If the node itself is the new winner, it
+       assumes the grandmaster role and begins
+       PTP_SYNC transmission.
+
+   4.  If another node is the new winner, the
+       node begins synchronizing to the new
+       grandmaster.
+
+   5.  The transition MUST complete within one
+       Sync interval (125 ms) of the BMC re-
+       evaluation.
+
+   During the transition period (up to 500 ms
+   from the last valid Sync to the first Sync
+   from the new grandmaster), nodes MUST continue
+   audio playout using their free-running local
+   clock.  The clock servo (Section 7.8) MUST
+   re-acquire lock within 2 seconds of the first
+   Sync from the new grandmaster.
+
+   7.2.4.  Grandmaster Preemption
+
+   If a node with a superior (Clock Class,
+   Priority, UID) tuple appears on the network
+   (e.g., a node with an external GPS reference
+   boots up), the BMC algorithm will elect it as
+   the new grandmaster.
+
+   The transition proceeds as follows:
+
+   1.  All nodes receive the new node's BEACON
+       and re-evaluate BMC.
+
+   2.  The new grandmaster begins PTP_SYNC
+       transmission.
+
+   3.  The former grandmaster detects the
+       superior node and ceases PTP_SYNC
+       transmission within one Sync interval.
+
+   4.  All nodes begin synchronizing to the new
+       grandmaster.
+
+   During preemption, there is a brief period
+   (up to one Sync interval = 125 ms) where two
+   grandmasters may be transmitting PTP_SYNC.
+   Nodes MUST accept PTP_SYNC only from the node
+   they have elected as grandmaster and MUST
+   silently discard PTP_SYNC from other sources.
 
 7.3.  Sync Message (Type 0x10)
+
+   The PTP_SYNC message is transmitted by the
+   grandmaster at every Sync interval (125 ms).
+   It is the first step of the two-step clock
+   synchronization exchange.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -803,13 +3237,122 @@ Table of Contents
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 5: PTP Sync Message
+           Figure 16: PTP Sync Payload
 
-   Transmitted by the grandmaster.  Origin Timestamp
-   is a coarse estimate; precise time is in the
-   Follow_Up.
+   Payload size: 12 octets.
+
+   PTP Sequence (octets 0-1):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+      Default: 0 for the first Sync; increments
+         by 1 for each subsequent Sync.
+
+      A monotonically increasing counter that
+      identifies this Sync/Follow_Up pair.  The
+      grandmaster increments this counter by one
+      for each Sync message it transmits.  The
+      counter wraps from 65535 to 0.
+
+      The PTP Sequence is independent of the
+      Sequence Number in the common header.  The
+      common header Sequence Number counts all
+      packets from the source; the PTP Sequence
+      counts only PTP exchanges.
+
+      A slave uses the PTP Sequence to match a
+      Follow_Up message (Section 7.4) to its
+      corresponding Sync message.  A Follow_Up
+      whose PTP Sequence does not match the most
+      recently received Sync MUST be discarded.
+
+   Reserved (octets 2-3):
+
+      Type: 16-bit field.
+      Size: 2 octets.
+      Valid range: 0x0000.
+      Default: 0x0000.
+
+      Reserved for future use.  A transmitter
+      MUST set this field to 0x0000.  A receiver
+      MUST ignore this field.
+
+   Origin Timestamp (octets 4-11):
+
+      Type: signed 64-bit integer.
+      Size: 8 octets.
+      Valid range: any non-negative value
+         representing nanoseconds since the PTP
+         epoch.
+      Default: the grandmaster's best estimate
+         of the current PTP time at the moment
+         of transmission.
+
+      In two-step mode, this timestamp is a
+      coarse estimate.  The precise hardware-
+      captured departure timestamp is carried
+      in the subsequent Follow_Up message
+      (Section 7.4).  The Origin Timestamp
+      SHOULD be as close as possible to the
+      actual departure time to assist receivers
+      in coarse time alignment before the
+      Follow_Up arrives.
+
+      If the Origin Timestamp contains a
+      negative value, the receiver MUST discard
+      the packet.
+
+   Transmission rules:
+
+   -  The grandmaster MUST transmit PTP_SYNC at
+      intervals of 125 ms +/- 5 ms.
+
+   -  PTP_SYNC MUST be sent to the PTP
+      synchronization multicast group
+      (01:60:AB:FF:FF:01).
+
+   -  The hardware MUST capture the precise
+      departure timestamp (t1) as the frame
+      passes the MAC/PHY boundary.
+
+   -  A Follow_Up message carrying t1 MUST be
+      transmitted within 10 ms of the Sync
+      departure.
+
+   Reception rules:
+
+   -  A slave MUST record the hardware-captured
+      arrival timestamp (t2) when the Sync frame
+      is received at the MAC/PHY boundary.
+
+   -  The slave MUST store the (PTP Sequence, t2)
+      pair for correlation with the subsequent
+      Follow_Up.
+
+   -  If a new Sync arrives before the Follow_Up
+      for the previous Sync, the slave MUST
+      discard the incomplete pair and begin
+      tracking the new Sync.
+
+   ABNF for Sync payload:
+
+   sync-payload  = ptp-seq reserved-16
+                   origin-ts
+
+   ptp-seq       = uint16
+   reserved-16   = %x00.00
+   origin-ts     = uint64    ; nanoseconds
+
+      Figure 17: ABNF for Sync Payload
 
 7.4.  Follow_Up Message (Type 0x11)
+
+   The PTP_FOLLOW_UP message is transmitted by
+   the grandmaster immediately after the
+   corresponding Sync message.  It carries the
+   precise hardware-captured departure timestamp
+   of the Sync.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -821,19 +3364,220 @@ Table of Contents
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 6: PTP Follow_Up Message
+        Figure 18: PTP Follow_Up Payload
 
-   The PTP Sequence MUST match the preceding Sync.
-   The Precise Origin Timestamp is the hardware-
-   captured time of the Sync departure.
+   Payload size: 12 octets.
+
+   PTP Sequence (octets 0-1):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+
+      This field MUST contain the same value as
+      the PTP Sequence field in the corresponding
+      Sync message.  A slave uses this field to
+      match the Follow_Up to its Sync.
+
+      If a slave receives a Follow_Up whose PTP
+      Sequence does not match the PTP Sequence
+      of the most recently received Sync from
+      the same source, the slave MUST discard
+      the Follow_Up.
+
+   Reserved (octets 2-3):
+
+      Type: 16-bit field.
+      Size: 2 octets.
+      Valid range: 0x0000.
+      Default: 0x0000.
+
+      Reserved for future use.  Transmitter MUST
+      set to 0x0000.  Receiver MUST ignore.
+
+   Precise Origin Timestamp (octets 4-11):
+
+      Type: signed 64-bit integer.
+      Size: 8 octets.
+      Valid range: any non-negative value
+         representing nanoseconds since the PTP
+         epoch.
+
+      This is the hardware-captured timestamp of
+      the exact instant the Sync frame's first
+      octet crossed the MAC/PHY boundary of the
+      grandmaster's Ethernet interface.  This
+      timestamp is denoted "t1" in the offset
+      computation (Section 7.7).
+
+      The Precise Origin Timestamp MUST have a
+      resolution of 10 nanoseconds or better
+      (Section 7.10).
+
+      If the Precise Origin Timestamp contains
+      a negative value, the receiver MUST discard
+      the packet.
+
+      If the Precise Origin Timestamp differs
+      from the Origin Timestamp in the
+      corresponding Sync by more than 10
+      milliseconds, the receiver SHOULD log a
+      warning (this may indicate a software
+      timestamping fallback rather than hardware
+      timestamping).
+
+   Transmission rules:
+
+   -  The grandmaster MUST transmit PTP_FOLLOW_UP
+      within 10 ms of the corresponding Sync.
+
+   -  PTP_FOLLOW_UP MUST be sent to the PTP
+      synchronization multicast group
+      (01:60:AB:FF:FF:01).
+
+   -  The PTP Sequence MUST match the preceding
+      Sync.
+
+   Reception rules:
+
+   -  A slave MUST match the Follow_Up to the
+      most recent unmatched Sync using the PTP
+      Sequence field.
+
+   -  Upon successful matching, the slave records
+      t1 = Precise Origin Timestamp and t2 =
+      the locally captured arrival timestamp of
+      the Sync.  The slave now has the (t1, t2)
+      pair needed for offset computation
+      (Section 7.7).
+
+   -  If the slave cannot match the Follow_Up
+      (e.g., the Sync was missed), the slave
+      MUST discard the Follow_Up and wait for
+      the next Sync/Follow_Up pair.
+
+   ABNF for Follow_Up payload:
+
+   followup-payload = ptp-seq reserved-16
+                      precise-origin-ts
+
+   precise-origin-ts = uint64  ; nanoseconds
+
+      Figure 19: ABNF for Follow_Up Payload
 
 7.5.  Delay_Req Message (Type 0x12)
 
-   Identical format to Sync (Figure 5).  Sent by a
-   slave.  The slave records its hardware departure
-   timestamp locally as t3.
+   The PTP_DELAY_REQ message is transmitted by a
+   slave to the grandmaster to measure the
+   one-way network delay.  Together with the
+   Delay_Resp from the grandmaster, it provides
+   the (t3, t4) timestamp pair needed for offset
+   and delay computation (Section 7.7).
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |       PTP Sequence            |           Reserved            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   |              Origin Timestamp (64 bits, ns)                   |
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+        Figure 20: PTP Delay_Req Payload
+
+   Payload size: 12 octets.
+
+   The format is identical to the Sync message
+   (Figure 16).
+
+   PTP Sequence (octets 0-1):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+
+      A per-slave counter, incremented by one
+      for each Delay_Req the slave transmits.
+      Wraps from 65535 to 0.
+
+      This counter is independent of the
+      grandmaster's PTP Sequence counter.  The
+      grandmaster uses this value in the
+      Delay_Resp to allow the slave to match
+      the response.
+
+   Reserved (octets 2-3):
+
+      Type: 16-bit field.
+      Size: 2 octets.
+      Default: 0x0000.
+
+      Reserved for future use.  Transmitter
+      MUST set to 0x0000.  Receiver MUST ignore.
+
+   Origin Timestamp (octets 4-11):
+
+      Type: signed 64-bit integer.
+      Size: 8 octets.
+
+      The slave's best estimate of the current
+      PTP time at the moment of transmission.
+      This value is informational; the precise
+      departure timestamp (t3) is captured
+      locally by the slave's hardware
+      timestamping unit and is NOT transmitted
+      on the wire.
+
+      The grandmaster does not use this field
+      for clock computation.  It MAY use it for
+      diagnostic purposes (e.g., to estimate
+      the slave's current offset before the
+      delay measurement completes).
+
+   Transmission rules:
+
+   -  A slave MUST transmit PTP_DELAY_REQ at
+      intervals of 500 ms +/- 50 ms.
+
+   -  Slaves SHOULD randomize the initial
+      Delay_Req transmission time to avoid
+      all slaves transmitting simultaneously.
+      The randomization window is 0 to 500 ms
+      after the first successful
+      Sync/Follow_Up reception.
+
+   -  PTP_DELAY_REQ MUST be sent to the PTP
+      synchronization multicast group
+      (01:60:AB:FF:FF:01).
+
+   -  The slave's hardware MUST capture the
+      precise departure timestamp (t3) as the
+      frame passes the MAC/PHY boundary.
+
+   -  The slave MUST store the (PTP Sequence,
+      t3) pair locally for correlation with the
+      subsequent Delay_Resp.
+
+   -  A slave MUST NOT transmit PTP_DELAY_REQ
+      before it has received at least one valid
+      Sync/Follow_Up pair from the grandmaster.
+
+   ABNF for Delay_Req payload:
+
+   delay-req-payload = ptp-seq reserved-16
+                       origin-ts
+
+      Figure 21: ABNF for Delay_Req Payload
 
 7.6.  Delay_Resp Message (Type 0x13)
+
+   The PTP_DELAY_RESP message is transmitted by
+   the grandmaster in response to a Delay_Req
+   from a slave.  It carries the hardware-
+   captured arrival timestamp of the Delay_Req
+   at the grandmaster (t4) and identifies the
+   requesting slave.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -847,52 +3591,532 @@ Table of Contents
    |                      Requester UID                            |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 7: PTP Delay_Resp Message
+        Figure 22: PTP Delay_Resp Payload
 
-   Receive Timestamp is the hardware-captured arrival
-   time of the Delay_Req at the grandmaster (t4).
+   Payload size: 16 octets.
 
-   The slave computes offset and delay:
+   PTP Sequence (octets 0-1):
+
+      Type: unsigned 16-bit integer.
+      Size: 2 octets.
+      Valid range: 0 to 65535.
+
+      This field MUST contain the same PTP
+      Sequence value as the Delay_Req that
+      triggered this response.  The requesting
+      slave uses this field to match the
+      response to its request.
+
+      If a slave receives a Delay_Resp whose
+      PTP Sequence does not match any outstanding
+      Delay_Req from that slave, the slave MUST
+      discard the Delay_Resp.
+
+   Reserved (octets 2-3):
+
+      Type: 16-bit field.
+      Size: 2 octets.
+      Default: 0x0000.
+
+      Reserved for future use.  Transmitter
+      MUST set to 0x0000.  Receiver MUST ignore.
+
+   Receive Timestamp (octets 4-11):
+
+      Type: signed 64-bit integer.
+      Size: 8 octets.
+
+      The hardware-captured timestamp of the
+      exact instant the Delay_Req frame's first
+      octet crossed the MAC/PHY boundary of the
+      grandmaster's Ethernet interface.  This
+      timestamp is denoted "t4" in the offset
+      computation (Section 7.7).
+
+      The Receive Timestamp MUST have a
+      resolution of 10 nanoseconds or better
+      (Section 7.10).
+
+      If the Receive Timestamp contains a
+      negative value, the slave MUST discard
+      the packet.
+
+   Requester UID (octets 12-15):
+
+      Type: unsigned 32-bit integer.
+      Size: 4 octets.
+      Valid range: 0x00000001 to 0xFFFFFFFF.
+
+      The Node UID of the slave that transmitted
+      the Delay_Req.  The grandmaster copies this
+      value from the Source UID field of the
+      received Delay_Req's common header.
+
+      A slave MUST verify that the Requester UID
+      matches its own Node UID before using the
+      Receive Timestamp.  If the UID does not
+      match, the slave MUST silently discard the
+      Delay_Resp (it is addressed to a different
+      slave).
+
+      Since Delay_Resp is sent to the PTP
+      multicast group, all slaves receive every
+      Delay_Resp.  The Requester UID field
+      provides the necessary demultiplexing.
+
+   Transmission rules:
+
+   -  The grandmaster MUST transmit a
+      PTP_DELAY_RESP within 10 ms of receiving
+      the corresponding Delay_Req.
+
+   -  The grandmaster MUST capture the arrival
+      timestamp (t4) using hardware timestamping
+      when the Delay_Req frame arrives at the
+      MAC/PHY boundary.
+
+   -  PTP_DELAY_RESP MUST be sent to the PTP
+      synchronization multicast group
+      (01:60:AB:FF:FF:01).
+
+   -  The PTP Sequence MUST match the Delay_Req.
+
+   -  The Requester UID MUST match the
+      Delay_Req's Source UID.
+
+   ABNF for Delay_Resp payload:
+
+   delay-resp-payload = ptp-seq reserved-16
+                        receive-ts requester-uid
+
+   receive-ts     = uint64  ; nanoseconds
+   requester-uid  = uint32
+
+      Figure 23: ABNF for Delay_Resp Payload
+
+7.7.  Offset and Delay Computation
+
+   After a complete measurement cycle (one
+   Sync/Follow_Up exchange and one Delay_Req/
+   Delay_Resp exchange), a slave has four
+   hardware-captured timestamps:
+
+   t1:  Precise departure time of the Sync at
+        the grandmaster (from Follow_Up).
+
+   t2:  Arrival time of the Sync at the slave
+        (captured locally).
+
+   t3:  Departure time of the Delay_Req at the
+        slave (captured locally).
+
+   t4:  Arrival time of the Delay_Req at the
+        grandmaster (from Delay_Resp).
+
+   7.7.1.  Offset Computation
+
+   The clock offset (the difference between the
+   slave's clock and the grandmaster's clock) is:
 
       offset = ((t2 - t1) - (t4 - t3)) / 2
-      delay  = ((t2 - t1) + (t4 - t3)) / 2
 
-   Where t1 = Precise Origin (Follow_Up),
-   t2 = Sync arrival (local HW timestamp),
-   t3 = Delay_Req departure (local HW timestamp),
-   t4 = Receive Timestamp (Delay_Resp).
+   A positive offset means the slave's clock is
+   ahead of the grandmaster.  A negative offset
+   means the slave's clock is behind.
 
-   Implementations SHOULD filter offset and delay
-   using an exponential moving average with a
-   coefficient of 1/16.
+   7.7.2.  Delay Computation
 
-7.7.  Media Clock Recovery
+   The mean one-way network propagation delay is:
 
-   Receivers MUST derive their audio sample clock
-   from the PTP time base.  Implementations SHOULD
-   use a PLL or NCO to generate a low-jitter sample
-   clock locked to the PTP reference.
+      delay = ((t2 - t1) + (t4 - t3)) / 2
 
-   Audio packets carry presentation timestamps in the
-   PTP time base (Section 10.4).
+   This assumes symmetric path delay (the
+   propagation time from grandmaster to slave
+   equals the propagation time from slave to
+   grandmaster).  The AudioBus PTP profile
+   requires that path asymmetry be less than
+   100 nanoseconds (Table 9).
 
-7.8.  Hardware Timestamping
+   7.7.3.  Timestamp Validation
 
-   Conformant implementations MUST capture timestamps
-   at the MAC/PHY boundary for PTP event messages
-   (Sync and Delay_Req).
+   Before computing offset and delay, the slave
+   MUST validate the timestamps:
 
-   Timestamp resolution MUST be 10 nanoseconds or
-   better.  A resolution of 1 nanosecond is
-   RECOMMENDED.
+   -  t1 MUST be non-negative.
+   -  t2 MUST be non-negative.
+   -  t3 MUST be non-negative.
+   -  t4 MUST be non-negative.
+   -  t2 MUST be greater than t1 (assuming no
+      initial offset; if t2 < t1, the offset is
+      very large and the computation is still
+      valid).
+   -  The computed delay MUST be positive.  If
+      delay <= 0, the measurement is invalid
+      and MUST be discarded.
+   -  The computed delay SHOULD be less than
+      10 milliseconds.  If delay >= 10 ms, the
+      measurement SHOULD be flagged as suspect
+      but SHOULD NOT be discarded unless it
+      exceeds 100 ms.
 
-   The timestamping mechanism MUST NOT introduce more
-   than 100 nanoseconds of non-deterministic error.
+   7.7.4.  Fixed-Point Arithmetic
 
+   All timestamp computations MUST be performed
+   using 64-bit signed integer arithmetic in
+   nanoseconds.  No floating-point arithmetic
+   is required.
+
+   The division by 2 in the offset and delay
+   formulas is an arithmetic right shift by 1
+   bit.  For signed integers, this preserves
+   the sign.
+
+   Intermediate values (t2 - t1) and (t4 - t3)
+   may exceed the range of a 32-bit integer.
+   Implementations MUST use 64-bit arithmetic
+   throughout.
+
+7.8.  Clock Servo
+
+   The clock servo disciplines the slave's local
+   clock to track the grandmaster's clock using
+   the offset measurements from Section 7.7.
+
+   7.8.1.  Servo Architecture
+
+   The RECOMMENDED servo architecture is a
+   proportional-integral (PI) controller:
+
+      correction = Kp * offset + Ki * integral
+
+   where:
+
+      Kp       = proportional gain
+      Ki       = integral gain
+      offset   = current measured offset (ns)
+      integral = running sum of offsets
+
+   The correction is applied to the local clock
+   by adjusting the frequency of the local
+   oscillator (NCO or PLL).
+
+   7.8.2.  Recommended Gain Values
+
+   +--------------------+----------+
+   | Parameter          | Value    |
+   +--------------------+----------+
+   | Kp (proportional)  | 1/16     |
+   | Ki (integral)      | 1/256    |
+   | Max correction     | +/- 100  |
+   |   per step (ns)    |   ns     |
+   | Initial step mode  | hard set |
+   +--------------------+----------+
+
+      Table 10: Servo Parameters
+
+   These values are RECOMMENDED.  Implementations
+   MAY use different values provided the servo
+   converges to within 1 microsecond within 2
+   seconds of the first valid Sync/Follow_Up
+   pair.
+
+   7.8.3.  Initial Synchronization
+
+   On first lock (the first valid offset
+   measurement), the slave SHOULD set its local
+   clock directly to the grandmaster's time
+   (hard step) rather than using the PI
+   controller.  This avoids a long convergence
+   time when the initial offset is large (e.g.,
+   seconds or more).
+
+   After the hard step, the servo switches to PI
+   control for fine-grained tracking.
+
+   7.8.4.  Filtering
+
+   Implementations SHOULD filter raw offset and
+   delay measurements before feeding them to the
+   servo.  The RECOMMENDED filter is an
+   exponential moving average (EMA):
+
+      filtered = (1 - alpha) * filtered_prev
+                 + alpha * raw
+
+   where alpha = 1/16 (equivalent to a 16-sample
+   window).
+
+   Implementations SHOULD also discard outlier
+   measurements.  A measurement is an outlier if
+   the raw offset differs from the filtered
+   offset by more than 10 microseconds.  Outlier
+   rejection prevents transient network events
+   (e.g., switch congestion) from disturbing the
+   clock.
+
+   7.8.5.  Holdover
+
+   If PTP messages from the grandmaster cease
+   (e.g., due to network failure), the slave MUST
+   continue generating the media clock using its
+   free-running local oscillator.  This is called
+   holdover mode.
+
+   In holdover mode:
+
+   -  The servo MUST freeze its integral term at
+      the last known value.
+
+   -  The local oscillator continues at the last
+      corrected frequency.
+
+   -  Audio playout continues uninterrupted.
+
+   -  The clock accuracy degrades at a rate
+      determined by the oscillator stability
+      (typically 20-50 ppm for a standard
+      crystal).
+
+   Holdover mode persists until either:
+
+   -  A new grandmaster is elected and PTP
+      resumes (normal recovery).
+
+   -  The holdover duration exceeds 10 seconds,
+      at which point the node SHOULD declare a
+      "clock unsynchronized" warning to the
+      application.
+
+7.9.  Media Clock Recovery
+
+   Each node MUST derive its audio sample clock
+   from the PTP time base.  This ensures that
+   all nodes in the network generate audio
+   samples at precisely the same rate,
+   eliminating drift and the need for sample
+   rate conversion.
+
+   7.9.1.  Clock Recovery Methods
+
+   Two methods are acceptable:
+
+   Phase-Locked Loop (PLL):
+
+      A hardware PLL locks its voltage-controlled
+      oscillator (VCO) to the PTP time base.
+      The PLL input is typically a pulse-per-
+      second or pulse-per-sample signal derived
+      from the local PTP clock.
+
+      The PLL loop bandwidth SHOULD be between
+      1 Hz and 10 Hz to reject high-frequency
+      jitter while tracking low-frequency drift.
+
+   Numerically Controlled Oscillator (NCO):
+
+      A software or hardware NCO generates
+      sample clock edges based on a phase
+      accumulator driven by the PTP time base.
+      At each PTP measurement update, the NCO
+      frequency is adjusted to correct any
+      accumulated phase error.
+
+      The NCO resolution MUST be at least
+      32 bits for the phase accumulator.
+
+   7.9.2.  Jitter Requirements
+
+   The peak-to-peak jitter of the recovered
+   media clock, measured at the digital-to-
+   analog converter (DAC) input, MUST NOT
+   exceed:
+
+   -  1 nanosecond peak-to-peak for 24-bit and
+      32-bit audio.
+
+   -  5 nanoseconds peak-to-peak for 16-bit
+      audio.
+
+   These requirements ensure that clock jitter
+   does not degrade the signal-to-noise ratio
+   below the resolution of the audio data.
+
+   The relationship between clock jitter and
+   SNR degradation for a full-scale sinusoidal
+   signal at frequency f is:
+
+      SNR_jitter = -20 * log10(2 * pi * f * Tj)
+
+   where Tj is the RMS jitter.  For 1 ns peak-
+   to-peak (approximately 0.3 ns RMS) at
+   20 kHz:
+
+      SNR = -20 * log10(2 * 3.14159 * 20000
+                        * 0.3e-9)
+          = -20 * log10(3.77e-5)
+          = 88.5 dB
+
+   This exceeds the 24-bit dynamic range of
+   approximately 144 dB by a comfortable margin,
+   confirming that 1 ns jitter is adequate.
+
+7.10. Hardware Timestamping
+
+   Conformant implementations MUST capture PTP
+   event message timestamps at the MAC/PHY
+   boundary using hardware timestamping.
+
+   7.10.1.  Requirements
+
+   -  Timestamps MUST be captured at the point
+      where the frame's Start-of-Frame Delimiter
+      (SFD) crosses the MII/GMII/RGMII boundary
+      between the MAC and the PHY.
+
+   -  Timestamp resolution MUST be 10 nanoseconds
+      or better.  A resolution of 1 nanosecond
+      is RECOMMENDED.
+
+   -  The timestamping mechanism MUST NOT
+      introduce more than 100 nanoseconds of
+      non-deterministic error (i.e., the
+      timestamping jitter must be less than
+      100 ns peak-to-peak).
+
+   -  Timestamps MUST be captured for both
+      transmitted and received PTP event messages
+      (PTP_SYNC and PTP_DELAY_REQ).
+
+   -  PTP_FOLLOW_UP and PTP_DELAY_RESP are
+      general messages, not event messages.
+      They do not require hardware timestamping.
+
+   7.10.2.  Software Timestamping Fallback
+
+   Software timestamping (capturing timestamps
+   in the device driver or application layer)
+   is NOT RECOMMENDED because it introduces
+   non-deterministic delays due to interrupt
+   latency, context switching, and cache effects.
+
+   However, an implementation that cannot provide
+   hardware timestamping MAY use software
+   timestamping as a fallback, with the following
+   constraints:
+
+   -  The node MUST set its Clock Class to 248
+      (free-running) to ensure it is not elected
+      grandmaster.
+
+   -  The node's Priority MUST be 255 (lowest).
+
+   -  The achieved accuracy will be on the order
+      of 10-100 microseconds, which is
+      sufficient for some use cases (e.g.,
+      sound reinforcement with large venue
+      delays) but not for sample-accurate
+      playout at 96 kHz.
+
+   -  The node MUST advertise "software
+      timestamping" in its BEACON metadata so
+      that other nodes and management tools can
+      identify nodes with degraded clock
+      quality.
+
+7.11. LVDS Clock Synchronization
+
+   In LVDS mode, clock synchronization is
+   achieved through the inherent timing of the
+   TDM frame structure rather than through
+   PTP message exchange.
+
+   7.11.1.  Master Clock
+
+   The bus master generates the line clock from
+   its local oscillator.  This clock directly
+   determines the frame rate and thus the audio
+   sample rate.
+
+   The master's oscillator MUST have a frequency
+   accuracy of +/- 50 ppm or better.  For
+   professional audio applications, +/- 1 ppm
+   is RECOMMENDED (achievable with a TCXO or
+   OCXO).
+
+   If the master is also connected to an
+   Ethernet segment and is synchronized to an
+   Ethernet-mode grandmaster, the master's LVDS
+   clock MUST be derived from the PTP time base
+   using the media clock recovery mechanism
+   described in Section 7.9.
+
+   7.11.2.  Slave Clock Recovery
+
+   Each slave recovers the clock from the
+   incoming LVDS data stream using its CDR
+   circuitry.  The 8b10b coding guarantees
+   sufficient transitions for reliable clock
+   recovery.
+
+   The recovered clock is used directly as the
+   audio sample clock.  No PTP exchange is
+   needed on the LVDS link because all slaves
+   are inherently synchronized to the master's
+   clock through the physical layer.
+
+   7.11.3.  Clock Accuracy
+
+   The clock accuracy between the master and
+   any slave on the LVDS chain is limited by:
+
+   -  CDR jitter: typically < 0.5 ns peak-to-
+      peak for modern LVDS transceivers.
+
+   -  Accumulated jitter over H hops: grows as
+      approximately sqrt(H) * Tj_per_hop.
+
+   For a 15-node chain with 0.5 ns per-hop
+   jitter:
+
+      Tj_total = sqrt(15) * 0.5 ns
+               = 1.94 ns peak-to-peak
+
+   This is well within the 5 ns requirement for
+   16-bit audio and close to the 1 ns
+   requirement for 24/32-bit audio.  For chains
+   longer than 8 nodes with 32-bit audio,
+   implementations SHOULD use a higher-quality
+   CDR (< 0.25 ns per hop) or reduce the chain
+   length.
+
+   7.11.4.  Sample Rate Accuracy
+
+   The LVDS frame rate is locked to the master's
+   oscillator.  If the master uses a crystal with
+   +/- 50 ppm accuracy, the sample rate will be:
+
+      Fs_actual = Fs_nominal * (1 +/- 50e-6)
+
+   At 48000 Hz with +50 ppm:
+
+      Fs_actual = 48000 * 1.00005 = 48002.4 Hz
+
+   Over 24 hours, this would accumulate a
+   4.32-second drift relative to an external
+   reference.  For standalone LVDS chains, this
+   drift is typically not audible.  For chains
+   bridged to an Ethernet segment, the master
+   MUST lock to the PTP time base to eliminate
+   drift entirely.
 
 8.  Node Discovery
 
 8.1.  Beacon Format (Type 0x02)
+
+   Every node transmits periodic beacon packets to
+   advertise its presence, capabilities, and clock
+   state.  The beacon payload follows the common
+   header (Section 4.1).
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -903,85 +4127,347 @@ Table of Contents
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |PTP Priority   |PTP Clock Class|           Flags               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | Max Channels  |  Tunnel Caps  |     Uptime (seconds)          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                    Node Name (UTF-8)                       ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
             Figure 8: Beacon Message
 
-   Name Len:  Length of the node name in octets.
-      Maximum 31.
+   ABNF for beacon payload:
 
-   HW Type:  See Section 8.4.
+   beacon-payload = node-uid name-len hw-type
+                    talker-streams listener-slots
+                    ptp-priority ptp-clock-class
+                    flags max-channels tunnel-caps
+                    uptime node-name
 
-   Talker Streams:  Number of streams this node
-      currently publishes.
+   node-uid       = 4OCTET
+   name-len       = OCTET  ; 0..31
+   hw-type        = OCTET  ; Table 6
+   talker-streams = OCTET  ; 0..255
+   listener-slots = OCTET  ; 0..255
+   ptp-priority   = OCTET  ; 1..255, default 128
+   ptp-clock-class= OCTET  ; 6, 13, or 248
+   flags          = 2OCTET ; big-endian
+   max-channels   = OCTET  ; 1..64
+   tunnel-caps    = OCTET  ; bitmask
+   uptime         = 2OCTET ; big-endian, seconds
+   node-name      = *31OCTET ; UTF-8
 
-   Listener Slots:  Number of additional streams this
-      node can subscribe to.
+   Field definitions:
 
-   Flags:
-      Bit 0:  Node is current grandmaster.
-      Bits 1-15:  Reserved.  MUST be zero.
+   Node UID:  32 bits.  Unique identifier derived per
+      Section 8.3.  This field MUST match the Source
+      UID in the common header.
+
+   Name Len:  8 bits.  Length of the Node Name field
+      in octets.  Range: 0 to 31.  A value of 0
+      indicates no name.
+
+   HW Type:  8 bits.  Hardware classification per
+      Section 8.4 and Table 6.  Default: 0 (Generic).
+
+   Talker Streams:  8 bits.  Number of streams this
+      node currently publishes.  Range: 0 to 255.
+      A listener-only node sets this to 0.
+
+   Listener Slots:  8 bits.  Number of additional
+      stream subscriptions this node can accept.
+      Range: 0 to 255.  A talker-only node sets
+      this to 0.
+
+   PTP Priority:  8 bits.  This node's priority for
+      grandmaster election.  Lower values win.
+      Range: 1 to 255.  Default: 128.  A value of 1
+      forces grandmaster.  A value of 255 prevents
+      grandmaster election.
+
+   PTP Clock Class:  8 bits.  Quality of this node's
+      clock source.
+
+      6:    Primary reference (GPS/atomic).
+      13:   Application-specific (e.g., word clock).
+      248:  Free-running oscillator (default).
+
+   Flags:  16 bits.  Big-endian.
+
+      Bit 0:   Grandmaster flag.  1 = this node
+               is the current grandmaster.
+      Bit 1:   LVDS capable.  1 = this node
+               supports LVDS transport.
+      Bit 2:   Ethernet capable.  1 = this node
+               supports Ethernet transport.
+      Bit 3:   Bridge node.  1 = this node bridges
+               between Ethernet and LVDS.
+      Bits 4-15:  Reserved.  MUST be zero on
+               transmit.  Receivers MUST ignore.
+
+   Max Channels:  8 bits.  Maximum number of audio
+      channels this node can source or sink in any
+      single stream.  Range: 1 to 64.
+
+   Tunnel Caps:  8 bits.  Bitmask of supported
+      tunnel types.
+
+      Bit 0:  SPI tunnel supported.
+      Bit 1:  I2C tunnel supported.
+      Bit 2:  GPIO tunnel supported.
+      Bit 3:  MIDI tunnel supported.
+      Bit 4:  Sideband channel supported.
+      Bits 5-7:  Reserved.  MUST be zero.
+
+   Uptime:  16 bits.  Big-endian.  Node uptime in
+      seconds since last reset.  Saturates at 65535.
+
+   Node Name:  Variable length, up to 31 octets.
+      UTF-8 encoded.  MUST NOT be null-terminated.
+      Implementations SHOULD include a model name
+      and a suffix derived from the last 2 octets
+      of the MAC address (e.g., "Speaker-A3F2").
+
+   Beacon packets are sent to the discovery
+   multicast address 01:60:AB:FF:FF:00 (Ethernet)
+   or embedded in DISCOVERY-type frames (LVDS).
 
 8.2.  Beacon Timing
 
-   Beacons MUST be transmitted every 1000 milliseconds,
-   with a jitter tolerance of +/- 100 milliseconds.
+   All nodes MUST transmit beacons at a nominal
+   interval of 1000 milliseconds.
 
-   Implementations SHOULD randomize the initial beacon
-   transmission time within the first 1000 milliseconds
-   after startup to avoid synchronization of beacon
-   transmissions across simultaneously booting nodes.
+   Beacon timing constraints:
+
+   -  Nominal interval:  1000 ms.
+   -  Jitter tolerance:  +/- 100 ms.
+   -  Minimum interval:  900 ms.
+   -  Maximum interval:  1100 ms.
+
+   Initial transmission randomization:
+
+      On startup, a node MUST delay its first beacon
+      by a random interval uniformly distributed in
+      the range [0, 1000) milliseconds.  This
+      prevents beacon synchronization when multiple
+      nodes boot simultaneously.
+
+   The randomization seed SHOULD be derived from the
+   low bits of the MAC address or a hardware random
+   number generator.
+
+   A node MUST transmit its first beacon within
+   1000 milliseconds of completing initialization.
+
+   LVDS-mode beacon timing:
+
+      In LVDS mode, beacons are embedded in
+      DISCOVERY-type TDM frames.  The master sends
+      discovery frames at a nominal interval of
+      1000 ms.  Slaves respond within the same frame
+      when polled.  The timing constraints above
+      apply to the master's discovery frame rate.
+
+   IGMP snooping interaction:
+
+      On Ethernet switches that implement IGMP
+      snooping, AudioBus multicast traffic may be
+      pruned from ports without listeners.  Because
+      AudioBus uses Layer 2 multicast without IGMP,
+      switches MUST be configured to flood the
+      AudioBus multicast groups to all ports, or
+      IGMP snooping MUST be disabled on the AudioBus
+      VLAN.
+
+      Alternatively, implementations MAY send IGMP
+      Membership Report (IGMPv2 or IGMPv3) messages
+      for the discovery multicast group
+      (01:60:AB:FF:FF:00) mapped to the IPv4
+      multicast address 239.96.171.0 to ensure
+      switch forwarding.
 
 8.3.  Node Identification
 
-   The Node UID SHOULD be derived from the Ethernet
-   MAC address:
+   The Node UID is a 32-bit unsigned integer that
+   uniquely identifies a node within an AudioBus
+   network.
+
+   Derivation from Ethernet MAC address:
 
       UID = (MAC[2] << 24) | (MAC[3] << 16)
-          | (MAC[4] << 8)  | MAC[5]
+          | (MAC[4] << 8)  |  MAC[5]
 
-   The Node Name is a UTF-8 string.  Implementations
-   SHOULD include a model identifier and a suffix
-   derived from the MAC address.
+   Where MAC[0] through MAC[5] are the 6 octets of
+   the node's Ethernet MAC address, with MAC[0]
+   being the first (most significant) octet.
+
+   This uses the lower 4 octets of the MAC address,
+   which are the unique portion assigned by the
+   manufacturer.  The upper 2 octets (OUI prefix)
+   are discarded.
+
+   For LVDS-only nodes without an Ethernet MAC:
+
+      The UID SHOULD be derived from a hardware
+      unique identifier (e.g., the MCU's fused
+      serial number).  If no hardware identifier
+      is available, the UID MUST be assigned at
+      manufacturing time and stored in non-volatile
+      memory.
+
+   UID 0x00000000 is reserved for broadcast.
+   UID 0xFFFFFFFF is reserved for unassigned nodes.
+
+   A node MUST NOT change its UID during operation.
+   Two nodes MUST NOT have the same UID on the same
+   network.  If a UID collision is detected (a
+   beacon from a different node with the same UID),
+   the node with the higher PTP priority value
+   (lower priority) MUST generate a new UID by
+   XOR-ing its current UID with 0x80000000 and
+   re-announce.
+
+   Node Name:
+
+      The node name is a human-readable UTF-8 string
+      of 0 to 31 octets.  Implementations SHOULD
+      set a default name of the form:
+
+         <model>-<hex suffix>
+
+      Example: "AudioBridge-A3F2"
+
+      The name is informational only and MUST NOT be
+      used for addressing or identification.
 
 8.4.  Hardware Types
 
-   +-------+---------------------------------+
-   | Value | Description                     |
-   +-------+---------------------------------+
-   |     0 | Generic                         |
-   |     1 | Speaker / output device         |
-   |     2 | Microphone / input device       |
-   |     3 | Speaker + Microphone            |
-   |     4 | Analog bridge (ADC/DAC)         |
-   |     5 | Digital bridge (format conv.)   |
-   |     6 | Mixer / DSP                     |
-   |     7 | Recording device                |
-   | 8-254 | Unassigned                      |
-   |   255 | Vendor-specific                 |
-   +-------+---------------------------------+
+   The HW Type field classifies the primary function
+   of a node for user-interface presentation and
+   automatic routing.
+
+   +-------+------+-----------------------------+
+   | Value | Name | Description                 |
+   +-------+------+-----------------------------+
+   |     0 | GEN  | Generic (unclassified)      |
+   |     1 | SPK  | Speaker / output device     |
+   |     2 | MIC  | Microphone / input device   |
+   |     3 | IO   | Speaker + Microphone        |
+   |     4 | ABR  | Analog bridge (ADC/DAC)     |
+   |     5 | DBR  | Digital bridge (AES/SPDIF)  |
+   |     6 | MIX  | Mixer / DSP processor       |
+   |     7 | REC  | Recording device            |
+   |     8 | AMP  | Power amplifier             |
+   |     9 | EFX  | Effects processor           |
+   |    10 | CTL  | Control surface             |
+   | 11-63 |      | Unassigned (Expert Review)  |
+   |64-254 |      | Unassigned (Spec Required)  |
+   |   255 | VND  | Vendor-specific             |
+   +-------+------+-----------------------------+
 
             Table 6: Hardware Type Values
 
+   Implementations MUST set a meaningful hardware
+   type.  A node whose function does not match any
+   defined type MUST use 0 (Generic).
+
+   Receivers MUST NOT reject nodes based on their
+   hardware type.
+
 8.5.  Node Expiry
 
-   A node MUST be considered offline if no beacon
-   has been received within 3000 milliseconds.
+   A node MUST be considered offline if no valid
+   beacon has been received from that node within
+   the expiry timeout.
 
-   Upon expiry, the implementation MUST:
+   Expiry timeout:  3000 milliseconds (3 missed
+   beacon intervals).
 
-   1.  Remove the node from the local node table.
-   2.  Notify the application.
-   3.  If the node was grandmaster, re-run BMC
+   Upon expiry, the implementation MUST perform
+   the following actions in order:
+
+   1.  Mark the node as offline in the local node
+       table.
+   2.  Notify the application via the event callback
+       with event type NODE_LOST.
+   3.  If the expired node was the grandmaster,
+       immediately re-run the BMC algorithm
        (Section 7.2).
-   4.  Release any subscriptions to streams
-       from the expired node.
+   4.  Release all subscriptions to streams
+       originated by the expired node.
+   5.  If audio from the expired node was being
+       played, fade to silence over 10 milliseconds
+       (480 samples at 48 kHz) to avoid clicks.
+
+   A node that has expired MAY rejoin the network
+   by transmitting beacons again.  Receivers MUST
+   treat a beacon from a previously expired node
+   as a new discovery and re-initialize all state
+   for that node.
+
+8.6.  LVDS Discovery Sequence
+
+   In LVDS mode, discovery is master-initiated and
+   sequential.  The master discovers nodes one at a
+   time along the daisy chain.
+
+   The discovery process uses DISCOVERY-type TDM
+   frames (frame_type = 0x01) with sub-type codes
+   in the payload:
+
+   +------+--------------+---------------------------+
+   | Code | Name         | Direction                 |
+   +------+--------------+---------------------------+
+   | 0x01 | BEACON       | Master to chain           |
+   | 0x02 | RESPONSE     | Slave to master           |
+   | 0x03 | ASSIGN       | Master to specific slave  |
+   | 0x04 | CONFIG       | Master to all slaves      |
+   | 0x05 | CONFIG_ACK   | Slave to master           |
+   +------+--------------+---------------------------+
+
+            Table 7: LVDS Discovery Sub-Types
+
+   Sequence:
+
+   1.  Master sends BEACON with target_node_id = 1.
+   2.  The nearest undiscovered node (CDR locked
+       on upstream port, no address assigned) receives
+       the beacon and responds with its node
+       descriptor (RESPONSE sub-type).
+   3.  Master sends ASSIGN with the node's assigned
+       address.
+   4.  The newly addressed node enables its
+       downstream port.
+   5.  Master increments target_node_id and repeats
+       from step 1.
+   6.  If no RESPONSE is received within 50 ms,
+       discovery is complete.
+   7.  Master computes the slot map and distributes
+       it via CONFIG sub-type.
+   8.  Each slave acknowledges with CONFIG_ACK.
+   9.  On all ACKs received, master transitions to
+       RUNNING state.
+
+   Hot-plug detection:
+
+      Each node monitors the CDR LOCK signal on
+      both ports.  Loss of lock on the downstream
+      port indicates that the downstream node was
+      disconnected.  The node reports this to the
+      master via a STATUS frame.
+
+      When a new node is connected, CDR lock is
+      acquired on the upstream port of the existing
+      end-node.  The master detects the topology
+      change and re-runs discovery from the last
+      known node.
 
 
 9.  Stream Management
 
 9.1.  Stream Announcement (Type 0x05)
+
+   A talker advertises each published stream by
+   periodically transmitting a stream announcement
+   packet.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -992,6 +4478,8 @@ Table of Contents
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |    Packet Interval (us)       |   Encoding    |  Name Len     |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |   Stream Flags                |         Reserved              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                    Stream Name (UTF-8)                     ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                   Channel Labels (TLV)                     ...|
@@ -999,30 +4487,124 @@ Table of Contents
 
             Figure 9: Stream Announcement
 
+   ABNF for stream announcement payload:
+
+   announce-payload = stream-id channels bit-depth
+                      sample-rate pkt-interval
+                      encoding name-len
+                      stream-flags reserved
+                      stream-name channel-labels
+
+   stream-id      = 2OCTET  ; big-endian, 1..65534
+   channels       = OCTET   ; 1..64
+   bit-depth      = OCTET   ; 16, 24, or 32
+   sample-rate    = 4OCTET  ; big-endian Hz
+   pkt-interval   = 2OCTET  ; big-endian, us
+   encoding       = OCTET   ; 0 = Linear PCM
+   name-len       = OCTET   ; 0..63
+   stream-flags   = 2OCTET  ; big-endian
+   reserved       = 2OCTET  ; MUST be zero
+   stream-name    = *63OCTET
+   channel-labels = *channel-label
+   channel-label  = label-len label-text
+   label-len      = OCTET   ; 0..31
+   label-text     = *31OCTET ; UTF-8
+
+   Field definitions:
+
+   Stream ID:  16 bits.  Unique per talker.  Range
+      1 to 65534.  Value 0x0000 is reserved (node
+      metadata).  Value 0xFFFF is reserved.  The
+      talker assigns stream IDs starting from 1.
+
+   Channels:  8 bits.  Number of audio channels in
+      this stream.  Range: 1 to 64.
+
+   Bit Depth:  8 bits.  Sample bit depth.  Valid
+      values: 16, 24, 32.  Other values are reserved.
+      Receivers MUST reject announcements with
+      unsupported bit depths.
+
+   Sample Rate:  32 bits.  Big-endian.  Sample rate
+      in hertz.  Valid values: 44100, 48000, 88200,
+      96000.  Other values are reserved.
+
+   Packet Interval:  16 bits.  Big-endian.  Time in
+      microseconds between consecutive audio packets
+      for this stream.  Valid values: 125, 250, 500,
+      1000, 2000, 4000.
+
+   Encoding:  8 bits.
+
+      0:   Linear PCM (signed two's complement,
+           big-endian).  This is the only encoding
+           defined by this specification.
+      1-255:  Reserved for future use.
+
+   Name Len:  8 bits.  Length of the stream name in
+      octets.  Range: 0 to 63.
+
+   Stream Flags:  16 bits.  Big-endian.
+
+      Bit 0:   Active.  1 = stream is currently
+               transmitting audio data.  0 = stream
+               is announced but not yet active.
+      Bit 1:   Persistent.  1 = stream survives
+               talker reboot (stored in NVM).
+      Bits 2-15:  Reserved.  MUST be zero.
+
    A talker MUST transmit a stream announcement for
    each published stream at least once per beacon
-   interval (1000 ms).
+   interval (1000 ms).  A talker SHOULD transmit
+   the announcement immediately when the stream is
+   first created.
 
-   Encoding values:
-      0 = Linear PCM.
-      1-255: Reserved.
+   The announcement MUST be sent to the discovery
+   multicast address (01:60:AB:FF:FF:00).
 
 9.2.  Channel Labels
 
    Channel labels follow the stream name as a
-   sequence of length-prefixed UTF-8 strings:
+   sequence of length-prefixed UTF-8 strings.
+   There is exactly one label entry per channel,
+   in channel order (channel 0 first).
 
-      [length: 1 octet] [label: length octets]
+   Format of each entry:
 
-   One entry per channel, in channel order.  A
-   length of 0 indicates an unnamed channel.
+      [label-len: 1 octet]  Length of label text.
+      [label-text: label-len octets]  UTF-8 text.
+
+   A label-len of 0 indicates an unnamed channel.
+
+   Standard label conventions:
+
+   +----------+---------------------------------+
+   | Label    | Meaning                         |
+   +----------+---------------------------------+
+   | "L"      | Left                            |
+   | "R"      | Right                           |
+   | "C"      | Center                          |
+   | "LFE"    | Low Frequency Effects           |
+   | "LS"     | Left Surround                   |
+   | "RS"     | Right Surround                  |
+   | "M"      | Mono                            |
+   | "1".."64"| Numbered channel                |
+   +----------+---------------------------------+
+
+            Table 8: Standard Channel Labels
+
+   Total label data MUST NOT exceed the remaining
+   payload capacity after the stream name.
 
 9.3.  Stream Subscription (Type 0x03)
+
+   A listener requests audio from a talker by
+   sending a subscription packet.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |          Stream ID            |           Reserved            |
+   |          Stream ID            |        Subscription Seq       |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                        Talker UID                             |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -1031,44 +4613,181 @@ Table of Contents
 
             Figure 10: Stream Subscription
 
-   Ch Mask Len:  Length of the bitmask in octets.
-      0 = subscribe to all channels.
+   ABNF for subscription payload:
 
-   Channel Bitmask:  Bit N = 1 subscribes to
-      channel N.  LSB of first octet is channel 0.
+   subscribe-payload = stream-id sub-seq
+                       talker-uid ch-mask-len
+                       [channel-bitmask]
 
-   Talkers MUST transmit audio to the stream
-   multicast group regardless of subscriptions.
-   This enables stateless multicast operation.
+   stream-id       = 2OCTET  ; big-endian
+   sub-seq         = 2OCTET  ; big-endian
+   talker-uid      = 4OCTET  ; big-endian
+   ch-mask-len     = OCTET   ; 0..8
+   channel-bitmask = 1*8OCTET
+
+   Field definitions:
+
+   Stream ID:  16 bits.  The stream to subscribe to.
+
+   Subscription Seq:  16 bits.  Monotonically
+      increasing per listener.  Allows the talker
+      to deduplicate retransmitted subscriptions.
+
+   Talker UID:  32 bits.  UID of the node publishing
+      the stream.
+
+   Ch Mask Len:  8 bits.  Length of the channel
+      bitmask in octets.  Range: 0 to 8.  A value
+      of 0 means subscribe to all channels.
+
+   Channel Bitmask:  Variable, 1 to 8 octets.  Bit
+      N = 1 subscribes to channel N.  LSB of the
+      first octet is channel 0.  Unused high bits
+      MUST be zero.
+
+   Talkers transmit audio to the stream multicast
+   group regardless of subscription state.  This
+   enables stateless multicast; the subscription
+   serves only as a signal for the listener to join
+   the multicast group and begin buffering.
+
+   A listener MUST transmit a subscription to the
+   discovery multicast address.  The talker does not
+   acknowledge; the listener infers success by
+   receiving audio packets.
 
    Unsubscription (Type 0x04) uses the same format.
    The bitmask is ignored for unsubscription.
 
+   A listener MUST leave the stream multicast group
+   after sending an unsubscription.
+
 9.4.  Dynamic Channel Count
 
-   A talker MAY change the channel count by
-   sending a new announcement with the updated
-   count.
+   A talker MAY change the channel count of an
+   active stream.  The procedure is:
 
-   On channel addition, listeners MUST initialize
-   new channels to silence.  On channel removal,
-   listeners MUST cease reading removed channels.
+   1.  Talker sends a new stream announcement with
+       the updated Channels field.
 
-   Stream ID, sample rate, and bit depth MUST NOT
-   change.  To change these, the talker MUST delete
-   and recreate the stream.
+   2.  Talker adjusts audio packets to include the
+       new channel count, starting with the next
+       packet interval boundary.
+
+   3.  On channel addition, listeners MUST initialize
+       new channels to silence (zero samples).
+
+   4.  On channel removal, listeners MUST cease
+       reading removed channels immediately.
+
+   The following fields MUST NOT change during the
+   lifetime of a stream:
+
+   -  Stream ID
+   -  Sample Rate
+   -  Bit Depth
+   -  Encoding
+
+   To change any of these, the talker MUST delete
+   the stream (Section 9.5) and create a new one.
+
+   The Packet Interval MAY be changed.  Listeners
+   MUST adapt to the new interval without manual
+   intervention.
 
 9.5.  Stream Teardown (Type 0x06)
 
-   Payload: Stream ID (2 octets).
+   A talker removes a stream by sending a
+   STREAM_DELETE packet.
 
-   Listeners MUST release all resources for the
-   stream within one beacon interval.
+   Payload: 2 octets.
+
+      stream-delete-payload = stream-id
+      stream-id = 2OCTET  ; big-endian
+
+   The talker MUST:
+
+   1.  Stop transmitting audio packets for the
+       stream.
+   2.  Send a STREAM_DELETE packet.
+   3.  Retransmit the STREAM_DELETE packet two
+       additional times at 100 ms intervals to
+       ensure delivery (total: 3 transmissions).
+   4.  Leave the stream multicast group.
+   5.  Release the Stream ID for reuse.
+
+   Listeners MUST:
+
+   1.  Stop playout within one beacon interval
+       (1000 ms).
+   2.  Fade audio to silence over 10 ms (480
+       samples at 48 kHz).
+   3.  Leave the stream multicast group.
+   4.  Release all resources (buffers, state)
+       associated with the stream.
+   5.  Notify the application via event callback.
+
+9.6.  Stream Lifecycle State Machine
+
+   A stream transitions through the following
+   states:
+
+      +----------+    announce    +-----------+
+      |          |  -----------> |           |
+      |  IDLE    |               | ANNOUNCED |
+      |          |  <----------- |           |
+      +----------+    delete     +-----------+
+                                    |     ^
+                              first |     | stop
+                             audio  |     | audio
+                              pkt   |     |
+                                    v     |
+                                +-----------+
+                                |           |
+                                |  ACTIVE   |
+                                |           |
+                                +-----------+
+                                    |
+                              delete|
+                                    v
+                                +-----------+
+                                |           |
+                                | TEARDOWN  |
+                                |           |
+                                +-----------+
+                                    |
+                               3x   |
+                              sent  |
+                                    v
+                                +-----------+
+                                |           |
+                                |  DELETED  |
+                                |           |
+                                +-----------+
+
+         Figure 11: Stream Lifecycle State Machine
+
+   IDLE:  Stream ID is not in use.
+
+   ANNOUNCED:  Stream announcement has been sent
+      but no audio data is flowing yet.
+
+   ACTIVE:  Audio packets are being transmitted.
+
+   TEARDOWN:  STREAM_DELETE has been sent.  The
+      talker retransmits up to 2 more times.
+
+   DELETED:  All resources released.  Stream ID
+      may be reused after 5 seconds.
 
 
 10.  Audio Data Transport
 
 10.1.  Audio Packet Format (Type 0x01)
+
+   Audio data is carried in AUDIO packets, each
+   containing one or more sample frames for a
+   single stream.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -1089,131 +4808,504 @@ Table of Contents
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 11: Audio Packet
+            Figure 12: Audio Packet
 
-   The audio header is 20 octets.
+   ABNF for audio payload:
+
+   audio-payload  = stream-id channels bit-depth
+                    sample-rate samples-per-ch
+                    reserved pts audio-data
+
+   stream-id      = 2OCTET  ; big-endian
+   channels       = OCTET   ; 1..64
+   bit-depth      = OCTET   ; 16, 24, or 32
+   sample-rate    = 4OCTET  ; big-endian, Hz
+   samples-per-ch = 2OCTET  ; big-endian, 1..192
+   reserved       = 2OCTET  ; MUST be zero
+   pts            = 8OCTET  ; big-endian, signed ns
+   audio-data     = *OCTET  ; see Section 10.3
+
+   The audio header is 20 octets.  The total audio
+   payload is:
+
+      20 + (channels * samples-per-ch * (bit-depth/8))
+
+   Field definitions:
+
+   Stream ID:  16 bits.  Identifies the stream.
+      MUST match a previously announced stream.
+
+   Channels:  8 bits.  Number of interleaved
+      channels.  MUST match the current announcement.
+
+   Bit Depth:  8 bits.  16, 24, or 32.
+
+   Sample Rate:  32 bits.  MUST match the stream
+      announcement.  Included for self-describing
+      packets to allow receivers to decode without
+      prior announcement state.
+
+   Samples per Channel:  16 bits.  Number of sample
+      frames in this packet.  Determined by the
+      packet interval and sample rate:
+
+         N = sample_rate * packet_interval_us
+             / 1,000,000
+
+   Reserved:  16 bits.  MUST be zero.
+
+   Presentation Timestamp:  64 bits.  Signed
+      integer in nanoseconds.  See Section 10.4.
 
 10.2.  Sample Encoding
 
-   Samples are signed two's complement integers in
-   big-endian byte order:
+   All audio samples are encoded as signed two's
+   complement integers in big-endian (network) byte
+   order, with the most significant octet first.
 
-   +----------+--------+---------------------------+
-   | Depth    | Octets | Range                     |
-   +----------+--------+---------------------------+
-   | 16-bit   |      2 | -32768 to 32767           |
-   | 24-bit   |      3 | -8388608 to 8388607       |
-   | 32-bit   |      4 | -2147483648 to 2147483647 |
-   +----------+--------+---------------------------+
+   +----------+--------+-----------+------------------+
+   | Depth    | Octets | Min Value | Max Value        |
+   +----------+--------+-----------+------------------+
+   | 16-bit   |      2 |   -32768  |        32767     |
+   | 24-bit   |      3 | -8388608  |      8388607     |
+   | 32-bit   |      4 |-2^31      |      2^31 - 1    |
+   +----------+--------+-----------+------------------+
 
-            Table 7: Sample Encoding
+            Table 9: Sample Encoding Ranges
+
+   Encoding examples (big-endian byte order):
+
+   16-bit samples:
+
+      Silence:      0x00 0x00
+      Full-scale +:  0x7F 0xFF  (= +32767)
+      Full-scale -:  0x80 0x00  (= -32768)
+      Half-scale +:  0x40 0x00  (= +16384)
+      -1 (LSB):      0xFF 0xFF  (= -1)
+
+   24-bit samples:
+
+      Silence:      0x00 0x00 0x00
+      Full-scale +:  0x7F 0xFF 0xFF  (= +8388607)
+      Full-scale -:  0x80 0x00 0x00  (= -8388608)
+      -6 dBFS:       0x5A 0x82 0x79  (= +5931641)
+
+   32-bit samples:
+
+      Silence:      0x00 0x00 0x00 0x00
+      Full-scale +:  0x7F 0xFF 0xFF 0xFF
+      Full-scale -:  0x80 0x00 0x00 0x00
+      1 kHz sine peak at 48 kHz:
+                     0x7F 0xFF 0xFF 0xFF
+
+   Bit-depth conversion:
+
+      When a receiver's internal processing depth
+      differs from the wire format, the following
+      conversions apply:
+
+      16 to 32:  out = (int32_t)in16 << 16
+      24 to 32:  out = (int32_t)in24 << 8
+      32 to 24:  out = in32 >> 8 (truncation)
+      32 to 16:  out = in32 >> 16 (truncation)
+
+      Implementations SHOULD apply dithering when
+      truncating from higher to lower bit depth.
 
 10.3.  Sample Interleaving
 
-   Samples are interleaved by channel, then by
-   frame:
+   Samples are interleaved by channel within each
+   frame, then frames are concatenated:
 
       S(0,0) S(0,1) ... S(0,C-1)
       S(1,0) S(1,1) ... S(1,C-1)
       ...
       S(N-1,0) S(N-1,1) ... S(N-1,C-1)
 
-   Where S(f,c) is frame f, channel c.  C is the
-   channel count.  N is samples per channel.
+   Where S(f,c) is sample frame f, channel c.  C
+   is the channel count.  N is samples per channel.
 
-   Total audio data:
+   Total audio data size in octets:
 
-      C * N * (bit_depth / 8) octets
+      audio_bytes = C * N * (bit_depth / 8)
+
+   Example: 2 channels, 48 samples, 24-bit:
+
+      audio_bytes = 2 * 48 * 3 = 288 octets
+
+   The channel ordering is defined by the channel
+   labels in the stream announcement.  Channel 0 is
+   always the first channel in the interleave.
 
 10.4.  Presentation Timestamps
 
-   The Presentation Timestamp is a signed 64-bit
-   integer in nanoseconds, referenced to the PTP
-   time base.
+   The Presentation Timestamp (PTS) is a signed
+   64-bit integer in nanoseconds, referenced to the
+   PTP time base established in Section 7.
 
-   The talker computes:
+   Computation at the talker:
 
-      PTS = current_PTP_time + presentation_latency
+      PTS = T_capture + presentation_latency
 
-   Where presentation_latency is configurable
-   (default: 2,000,000 ns = 2 ms).
+   Where:
 
-   All listeners MUST begin playout of the same
-   samples at the same PTP-referenced instant.
+      T_capture is the PTP time at which the first
+      sample in the packet was captured (or would
+      have been captured for synthesized audio).
 
-   A listener MUST buffer audio and release it
-   only when the local PTP clock reaches the
-   presentation timestamp.
+      presentation_latency is a configurable offset
+      that determines how far in the future playout
+      occurs.  Default: 2,000,000 ns (2 ms).
 
-   Packets arriving after their presentation time
-   MUST be counted as late and SHOULD be discarded.
+   Presentation_latency MUST be at least:
+
+      pres_latency >= max_network_delay
+                    + max_jitter
+                    + receiver_processing_time
+
+   Where max_network_delay is the worst-case
+   one-way delay, max_jitter is the observed
+   peak-to-peak jitter, and receiver_processing_time
+   is the time needed to decode and route audio
+   to the output.
+
+   Playout algorithm at the listener:
+
+   1.  On receipt of an audio packet, extract PTS.
+   2.  Compute delta = PTS - current_PTP_time.
+   3.  If delta > 0, buffer the packet.
+   4.  If delta <= 0, the packet is late.
+       Increment late-packet counter.
+       If delta > -1,000,000 ns (-1 ms), play
+       immediately (soft late).  Otherwise, discard.
+   5.  When the local PTP clock reaches PTS,
+       release samples to the audio output.
+
+   All listeners receiving the same stream MUST
+   begin playout at the same PTP-referenced instant,
+   ensuring sample-accurate synchronization.
+
+   PTS wrap-around:
+
+      The 64-bit nanosecond counter wraps after
+      approximately 292 years.  Implementations
+      need not handle wrap-around.
 
 10.5.  Packet Interval
 
-   +------------+-----------+-----------------------+
-   | Interval   | Samples   | Use Case              |
-   | (us)       | at 48 kHz |                       |
-   +------------+-----------+-----------------------+
-   |        125 |         6 | Ultra-low latency     |
-   |        250 |        12 | Low latency           |
-   |        500 |        24 | Balanced              |
-   |       1000 |        48 | Default               |
-   |       2000 |        96 | High efficiency       |
-   |       4000 |       192 | Maximum efficiency    |
-   +------------+-----------+-----------------------+
+   The packet interval determines how many samples
+   are grouped into each audio packet.
 
-            Table 8: Packet Intervals
+   +----------+-------+-------+-------+-------+-----+
+   | Interval | 44.1k | 48k   | 88.2k | 96k   |Use  |
+   | (us)     | (smp) | (smp) | (smp) | (smp) |     |
+   +----------+-------+-------+-------+-------+-----+
+   |      125 |     6 |     6 |    11 |    12 |ULL  |
+   |      250 |    11 |    12 |    22 |    24 |LL   |
+   |      500 |    22 |    24 |    44 |    48 |Bal  |
+   |     1000 |    44 |    48 |    88 |    96 |Def  |
+   |     2000 |    88 |    96 |   176 |   192 |HE   |
+   |     4000 |   176 |   192 |   352 |   384 |ME   |
+   +----------+-------+-------+-------+-------+-----+
+
+   ULL=Ultra-Low Latency, LL=Low Latency,
+   Bal=Balanced, Def=Default, HE=High Efficiency,
+   ME=Maximum Efficiency.
+
+            Table 10: Packet Intervals and Counts
 
    Implementations MUST support 1000 us.  Support
-   for other values is RECOMMENDED.
+   for 125, 250, 500, 2000, and 4000 us is
+   RECOMMENDED.
 
-10.6.  Sequence Numbering
+   The samples-per-channel value for non-integer
+   divisions is computed as:
 
-   The common header sequence number increments per
-   audio packet per stream.  Wraps from 65535 to 0.
+      N = floor(sample_rate * interval_us
+                / 1,000,000)
 
-   Listeners SHOULD track expected sequence numbers
-   and report gaps as loss.
+   For 44100 Hz at 125 us:
+
+      N = floor(44100 * 125 / 1000000)
+        = floor(5.5125) = 5
+
+   However, to maintain long-term sample count
+   accuracy, the talker MUST alternate between
+   N and N+1 samples per packet such that the
+   average sample rate is exact.
+
+10.6.  Sequence Numbering and Gap Detection
+
+   The common header Sequence Number (Section 4.1)
+   is incremented by one for each audio packet
+   transmitted on a given stream.  The counter is
+   per-stream, per-source.  It wraps from 65535
+   to 0.
+
+   Expected next sequence number:
+
+      expected = (last_received + 1) mod 65536
+
+   Gap detection:
+
+      If the received sequence number does not
+      equal expected, a gap has occurred.
+
+      gap_size = (received - expected) mod 65536
+
+      If gap_size > 32768, interpret as a reorder
+      (the packet is old) and discard.
+
+      If gap_size <= 32768, interpret as loss.
+
+   On loss:
+
+   1.  Increment the lost-packet counter by
+       gap_size.
+   2.  Apply packet loss concealment
+       (Section 10.8).
+   3.  Update expected to received + 1.
 
    Loss ratio:
 
-      loss = lost / (received + lost)
+      loss_ratio = lost / (received + lost)
 
-10.7.  Playout Buffer
+   Implementations MUST report loss_ratio to the
+   application at least once per second.
 
-   The buffer depth MUST be at least:
+10.7.  Playout Buffer Sizing
 
-      depth >= pres_latency - min_network_delay
+   The playout buffer absorbs network jitter and
+   ensures audio continuity.  The minimum buffer
+   depth in sample frames is:
 
-   Implementations SHOULD dynamically adjust depth
-   based on observed jitter.
+      B_min = ceil(Fs * (pres_latency
+              - D_min) / 1,000,000,000)
+
+   Where:
+
+      Fs = sample rate in Hz.
+      pres_latency = presentation latency in ns.
+      D_min = minimum observed one-way network
+              delay in ns.
+
+   The recommended buffer depth is:
+
+      B_rec = ceil(Fs * (pres_latency
+              - D_min + 3 * J_rms)
+              / 1,000,000,000)
+
+   Where J_rms is the RMS jitter in ns computed
+   per Section 13.4.
+
+   The buffer MUST be implemented as a circular
+   (ring) buffer.  The buffer depth MUST be a
+   power of two for efficient modular arithmetic.
+
+   Example:
+
+      Fs = 48000 Hz
+      pres_latency = 2,000,000 ns
+      D_min = 100,000 ns
+      J_rms = 50,000 ns
+
+      B_min = ceil(48000 * (2000000 - 100000)
+              / 1000000000)
+            = ceil(48000 * 0.0019)
+            = ceil(91.2) = 92 samples
+
+      B_rec = ceil(48000 * (2000000 - 100000
+              + 150000) / 1000000000)
+            = ceil(48000 * 0.00205)
+            = ceil(98.4) = 99 samples
+
+      Round up to next power of two: 128 samples.
+
+   Implementations SHOULD dynamically adjust buffer
+   depth based on observed jitter, with a minimum
+   floor of 2 * packet_interval worth of samples.
 
 10.8.  Packet Loss Concealment
 
-   On loss (sequence gap), listeners SHOULD conceal:
+   When one or more audio packets are lost (detected
+   via sequence gap), the listener MUST conceal the
+   gap using one of the following strategies:
 
-   -  Zero insertion (silence)
-   -  Repetition of last valid frame
-   -  Linear interpolation
+   Level 0 - Silence insertion (REQUIRED):
 
-   The strategy is implementation-defined.
+      Insert zero-valued samples for each lost
+      frame.  This is the simplest and always-
+      available strategy.
+
+   Level 1 - Repetition (RECOMMENDED):
+
+      Repeat the last valid sample frame for each
+      lost frame.  Apply a linear fade toward zero
+      over the duration of the gap, with a maximum
+      fade time of 10 ms (480 samples at 48 kHz).
+
+   Level 2 - Interpolation (OPTIONAL):
+
+      If the packet following the gap arrives within
+      the playout deadline, linearly interpolate
+      between the last valid sample and the first
+      sample of the next packet.
+
+   Level 3 - Waveform substitution (OPTIONAL):
+
+      Use pitch-synchronous waveform repetition
+      (PSOLA or similar) to maintain tonal quality
+      during gaps of up to 40 ms.
+
+   The concealment strategy is implementation-
+   defined.  All implementations MUST support at
+   least Level 0.
+
+   After 100 ms of consecutive loss (approximately
+   100 packets at 1000 us interval), the
+   implementation MUST fade to silence and notify
+   the application.
+
+10.9.  MTU Considerations
+
+   The maximum audio packet size on Ethernet is
+   constrained by the path MTU.  The default
+   Ethernet MTU is 1500 octets.
+
+   Maximum audio payload per packet:
+
+      max_audio = MTU - eth_hdr - abus_hdr
+                  - audio_hdr
+                = 1500 - 14 - 12 - 20
+                = 1454 octets
+
+   Maximum samples per channel for a given
+   configuration:
+
+      max_N = floor(max_audio
+              / (channels * (bit_depth / 8)))
+
+   Example: 64 channels, 32-bit, MTU 1500:
+
+      max_N = floor(1454 / (64 * 4))
+            = floor(1454 / 256) = 5
+
+   This constrains the minimum packet interval
+   for high channel counts:
+
+   +------+-------+-------+-----------+-----------+
+   | Ch   | Depth | N/pkt | Audio(B)  | Min Int   |
+   +------+-------+-------+-----------+-----------+
+   |    2 |    32 |    48 |       384 | 1000 us   |
+   |    2 |    24 |    48 |       288 | 1000 us   |
+   |    8 |    32 |    48 |      1536 | 1000 us*  |
+   |    8 |    24 |    48 |      1152 | 1000 us   |
+   |   32 |    32 |    12 |      1536 | 250 us*   |
+   |   64 |    32 |     5 |      1280 | 125 us*   |
+   |   64 |    24 |     7 |      1344 | 125 us    |
+   +------+-------+-------+-----------+-----------+
+
+   * May require jumbo frames for higher N values.
+
+            Table 11: Audio Packet Sizes
+
+   Implementations SHOULD support jumbo frames
+   (9000 octets) when available.
+
+10.10. Bandwidth Calculation
+
+   The aggregate bandwidth for a single stream:
+
+      BW_bps = (C * D * Fs) + (Fs / N) * OH * 8
+
+   Where:
+
+      C  = channels
+      D  = bit depth (bits)
+      Fs = sample rate (Hz)
+      N  = samples per channel per packet
+      OH = per-packet overhead in octets
+         = ETH_HDR(14) + ABUS_HDR(12)
+           + AUDIO_HDR(20) = 46 octets
+
+   Worked example 1: 2ch, 24-bit, 48kHz, 1000us
+
+      BW = (2 * 24 * 48000)
+         + (48000 / 48) * 46 * 8
+         = 2,304,000 + 1000 * 368
+         = 2,304,000 + 368,000
+         = 2,672,000 bps = 2.672 Mbps
+
+   Worked example 2: 64ch, 32-bit, 48kHz, 1000us
+
+      BW = (64 * 32 * 48000)
+         + (48000 / 48) * 46 * 8
+         = 98,304,000 + 368,000
+         = 98,672,000 bps = 98.672 Mbps
+
+   Worked example 3: 64ch, 24-bit, 96kHz, 1000us
+
+      BW = (64 * 24 * 96000)
+         + (96000 / 96) * 46 * 8
+         = 147,456,000 + 368,000
+         = 147,824,000 bps = 147.824 Mbps
+
+      This exceeds 100 Mbps Ethernet.  Requires
+      Gigabit Ethernet or LVDS transport.
+
+   The LVDS transport bandwidth per direction:
+
+      BW_lvds = frame_bytes * Fs * 8
+              = 1024 * 48000 * 8
+              = 393,216,000 bps = 393.2 Mbps
+
+   This is the raw payload rate before 8b10b
+   encoding.  The line rate with 8b10b overhead
+   (25%) is:
+
+      line_rate = BW_lvds * 10 / 8
+               = 491,520,000 bps = 491.5 Mbps
 
 
 11.  Control Tunneling
 
 11.1.  Tunnel Packet Format (Type 0x20)
 
+   Control data for GPIO, MIDI, SPI, and I2C is
+   carried in TUNNEL packets.
+
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                        Target UID                             |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |  Tunnel Type  |  Tunnel Len   |    Payload                 ...|
+   |  Tunnel Type  |  Tunnel Seq   |      Tunnel Len               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                      Tunnel Payload                        ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 12: Tunnel Packet
+            Figure 13: Tunnel Packet
 
-   Target UID:  0x00000000 = broadcast.
+   ABNF for tunnel payload:
+
+   tunnel-payload = target-uid tunnel-type
+                    tunnel-seq tunnel-len
+                    tunnel-data
+
+   target-uid   = 4OCTET  ; 0x00000000 = broadcast
+   tunnel-type  = OCTET   ; Table 12
+   tunnel-seq   = OCTET   ; per-type sequence
+   tunnel-len   = 2OCTET  ; big-endian, octets
+   tunnel-data  = *OCTET  ; type-specific
+
+   Field definitions:
+
+   Target UID:  32 bits.  Destination node.
+      0x00000000 = broadcast to all nodes.
+      A node MUST discard tunnel packets not
+      addressed to it or to broadcast.
+
+   Tunnel Type:  8 bits.
 
    +-------+----------+------------------------------+
    | Value | Name     | Section                      |
@@ -1226,11 +5318,21 @@ Table of Contents
    | 5-15  | Reserved |                              |
    +-------+----------+------------------------------+
 
-            Table 9: Tunnel Type Values
+            Table 12: Tunnel Type Values
+
+   Tunnel Seq:  8 bits.  Per-type sequence counter.
+      Increments per packet per tunnel type per
+      target.  Wraps from 255 to 0.  Receivers use
+      this to detect loss and reordering.
+
+   Tunnel Len:  16 bits.  Big-endian.  Length of the
+      tunnel-data field in octets.
 
 11.2.  GPIO Tunnel (Type 2)
 
-   Payload: 2 octets.
+   The GPIO tunnel carries idempotent pin state.
+
+   Payload format (2 octets):
 
     0                   1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
@@ -1238,611 +5340,2225 @@ Table of Contents
    |        Pin States (16 bits)   |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-         Figure 13: GPIO Tunnel Payload
+         Figure 14: GPIO Tunnel Payload
 
-   Bit N = pin N.  1 = HIGH, 0 = LOW.
+   Bit N corresponds to GPIO pin N on the target
+   node.  1 = HIGH, 0 = LOW.  Bit 0 is the LSB.
 
-   GPIO packets are idempotent.  The receiver MUST
-   apply the full 16-bit state on each reception.
+   Timing requirements:
+
+      The sender SHOULD transmit GPIO state at a
+      minimum rate of 100 Hz (every 10 ms) when
+      the state is changing.  During steady state,
+      the sender MUST retransmit at least once per
+      second to ensure convergence after packet
+      loss.
+
+   Idempotency:
+
+      GPIO packets are idempotent.  The receiver
+      MUST apply the complete 16-bit state on each
+      reception, overwriting any previous state.
+      There is no delta encoding.
+
+   Error behavior:
+
+      On tunnel packet loss, the receiver retains
+      the last known GPIO state.  The sender's
+      periodic retransmission ensures eventual
+      consistency.
+
+   GPIO transition latency:
+
+      Worst case: 1 packet interval + network delay.
+      At 1000 us interval on Ethernet with 100 us
+      one-way delay: ~1100 us (1.1 ms).
+      At 48 kHz LVDS (frame period ~21 us):
+      ~42 us (one round-trip frame).
 
 11.3.  MIDI Tunnel (Type 3)
 
-   Payload: 1 to 3 octets of raw MIDI data.
+   The MIDI tunnel carries raw MIDI byte streams.
+
+   Payload format (1 to 253 octets):
 
     0
     0 1 2 3 4 5 6 7
    +-+-+-+-+-+-+-+-+
-   | Status        |
+   | MIDI Status   |
    +-+-+-+-+-+-+-+-+
    | Data 1        |  (OPTIONAL)
    +-+-+-+-+-+-+-+-+
    | Data 2        |  (OPTIONAL)
    +-+-+-+-+-+-+-+-+
+   | ...           |  (additional bytes)
+   +-+-+-+-+-+-+-+-+
 
-         Figure 14: MIDI Tunnel Payload
+         Figure 15: MIDI Tunnel Payload
 
-   System Exclusive messages exceeding 3 octets
-   MUST be fragmented.  The first fragment starts
-   with 0xF0; the last ends with 0xF7.
+   The payload contains raw MIDI bytes exactly
+   as they would appear on a MIDI 1.0 serial link.
+   Running status is permitted.
 
-   At 1 ms packet interval, throughput is
-   3000 octets/sec, approximately 10x standard
-   MIDI 1.0 (3125 octets/sec at 31250 baud).
+   Message framing:
+
+      Each tunnel packet SHOULD contain exactly one
+      complete MIDI message (1 to 3 octets for
+      channel messages).
+
+      Multiple short messages MAY be concatenated
+      in a single tunnel packet if they fit within
+      the tunnel bandwidth allocation.
+
+   System Exclusive (SysEx) fragmentation:
+
+      SysEx messages (0xF0 ... 0xF7) may exceed the
+      tunnel packet capacity.  They MUST be
+      fragmented as follows:
+
+      -  First fragment: begins with 0xF0, contains
+         as many data bytes as fit.
+      -  Middle fragments: contain continuation data
+         bytes (0x00-0x7F only, no status bytes).
+      -  Last fragment: ends with 0xF7.
+
+      The tunnel sequence number ensures correct
+      reassembly.  If a fragment is lost, the
+      receiver MUST discard the entire SysEx and
+      wait for the next 0xF0.
+
+      Maximum SysEx size: 65535 octets (limited by
+      Tunnel Len field).
+
+   Throughput calculation:
+
+      At 1000 us packet interval (Ethernet):
+         Max 3 octets per packet at minimum.
+         1000 packets/sec * 3 bytes = 3000 bytes/sec.
+         Standard MIDI 1.0 = 31250 baud / 10 bits
+         = 3125 bytes/sec.
+         AudioBus MIDI throughput is comparable to
+         standard MIDI at 1 ms interval.
+
+      At higher bandwidth allocations:
+         With 253 octets per packet at 1 ms:
+         253,000 bytes/sec = ~80x standard MIDI.
+
+      LVDS mode (3 bytes per frame at 48 kHz):
+         3 * 48000 = 144,000 bytes/sec
+         = ~46x standard MIDI.
+
+   Timing accuracy:
+
+      MIDI events are timestamped implicitly by
+      their transmission time.  For sample-accurate
+      MIDI timing, implementations SHOULD use the
+      sideband channel (Section 11.6) for MIDI
+      clock ticks and embed MIDI events in the
+      nearest audio packet boundary.
 
 11.4.  SPI Tunnel (Type 0)
+
+   The SPI tunnel enables remote SPI transactions
+   on a target node's SPI bus.
 
     0                   1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |   CS Pin      |   SPI Mode    |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |            SPI Data        ...|
+   |   Flags       |   TX Len      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |           TX Data          ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-         Figure 15: SPI Tunnel Payload
+         Figure 16: SPI Tunnel Payload
 
-   CS Pin:  Chip-select index (0-255).
-   SPI Mode:  0-3 (CPOL/CPHA).
+   CS Pin:  8 bits.  Chip-select index on the target
+      node.  Range: 0 to 15.  Values 16-255 are
+      reserved.
 
-   Response data MAY be returned via a reverse
-   tunnel packet.
+   SPI Mode:  8 bits.  SPI clock polarity and phase.
+
+      0: CPOL=0, CPHA=0 (Mode 0).
+      1: CPOL=0, CPHA=1 (Mode 1).
+      2: CPOL=1, CPHA=0 (Mode 2).
+      3: CPOL=1, CPHA=1 (Mode 3).
+      4-255: Reserved.
+
+   Flags:  8 bits.
+
+      Bit 0:  Response requested.  1 = the target
+              MUST send a reverse SPI tunnel packet
+              containing the MISO data.
+      Bit 1:  CS hold.  1 = do not deassert CS
+              after this transaction (for multi-
+              packet transfers).
+      Bits 2-7:  Reserved.  MUST be zero.
+
+   TX Len:  8 bits.  Length of TX Data in octets.
+      Range: 1 to 249.
+
+   TX Data:  Variable.  MOSI data to transmit.
+
+   Response mechanism:
+
+      When bit 0 of Flags is set, the target node
+      executes the SPI transaction and returns the
+      MISO data in a reverse TUNNEL packet addressed
+      to the requester.  The reverse packet has the
+      same format with the TX Data replaced by RX
+      Data and the Response flag cleared.
+
+      The tunnel sequence number in the response
+      MUST match the request.
+
+      Timeout: the requester MUST wait up to 100 ms
+      for a response.  If no response arrives, the
+      transaction is considered failed.
 
 11.5.  I2C Tunnel (Type 1)
+
+   The I2C tunnel enables remote I2C transactions.
 
     0                   1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |  I2C Address  |    Flags      |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |            I2C Data        ...|
+   |  TX Len       |   RX Len      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |           I2C TX Data      ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-         Figure 16: I2C Tunnel Payload
+         Figure 17: I2C Tunnel Payload
 
-   I2C Address:  7-bit address in bits 6:0.
-      Bit 7 MUST be zero.
+   I2C Address:  8 bits.  7-bit I2C address in
+      bits 6:0.  Bit 7 MUST be zero.  Range of
+      address: 0x08 to 0x77 (valid 7-bit range,
+      excluding reserved addresses).
 
-   Flags:
-      Bit 0: 1 = Read, 0 = Write.
-      Bits 1-7: Reserved.  MUST be zero.
+   Flags:  8 bits.
 
-   For reads, the data field contains the register
-   address.  Response is returned via reverse tunnel.
+      Bit 0:  Direction.  1 = Read, 0 = Write.
+      Bit 1:  10-bit address.  1 = the address
+              field is the low 7 bits; the high
+              3 bits follow in the first TX byte.
+      Bit 2:  Repeated start.  1 = use repeated
+              start between write and read phases.
+      Bits 3-7:  Reserved.  MUST be zero.
+
+   TX Len:  8 bits.  Length of TX data.  For a
+      write, this is the data to write.  For a
+      read, this is the register address to send
+      before reading.  Range: 0 to 248.
+
+   RX Len:  8 bits.  Number of bytes to read.
+      Range: 0 to 248.  For writes, MUST be zero.
+
+   I2C TX Data:  Variable.  Data to transmit on
+      the I2C bus.
+
+   Read response:
+
+      For read transactions (Flags bit 0 = 1),
+      the target node performs the I2C read and
+      returns the data in a reverse TUNNEL packet.
+      The response contains:
+
+      -  I2C Address:  echoed from request.
+      -  Flags:  bit 0 = 0 (write, carrying data).
+      -  TX Len:  length of read data.
+      -  RX Len:  0.
+      -  TX Data:  the bytes read from the I2C bus.
+
+      The tunnel sequence number MUST match.
+      Timeout: 100 ms.
+
+   Error reporting:
+
+      If the I2C transaction fails (NACK, timeout,
+      bus error), the target sends a response with
+      TX Len = 1 and TX Data = error code:
+
+      0x01:  NACK on address.
+      0x02:  NACK on data.
+      0x03:  Bus error.
+      0x04:  Timeout.
 
 11.6.  Sideband Channel (Type 4)
 
-   Payload: 1 octet of arbitrary data per
-   direction per frame.
+   The sideband provides a single-octet,
+   per-direction, per-frame data path with
+   absolute minimum latency.
 
-   Typical use: MIDI clock tick, sync trigger,
-   or 1-bit flags.
+   Payload: 1 octet.
+
+    0
+    0 1 2 3 4 5 6 7
+   +-+-+-+-+-+-+-+-+
+   |  Sideband Data|
+   +-+-+-+-+-+-+-+-+
+
+         Figure 18: Sideband Payload
+
+   The sideband byte is embedded in every audio
+   packet (Ethernet mode) or every TDM frame
+   (LVDS mode).  It has zero additional latency
+   beyond the audio transport itself.
+
+   Typical uses:
+
+   -  Bit 0:  MIDI clock tick (24 ppqn).
+   -  Bit 1:  Transport start/stop.
+   -  Bit 2:  Trigger/gate signal.
+   -  Bits 3-7:  Application-defined.
+
+   In LVDS mode, the sideband byte occupies a
+   dedicated 1-byte slot in both the downstream
+   and upstream regions of the TDM frame
+   (Section 6.3).
+
+   In Ethernet mode, the sideband byte is carried
+   in TUNNEL packets with type SIDEBAND.
 
 
 12.  Metadata
 
 12.1.  Metadata Packet Format (Type 0x30)
 
+   Metadata carries descriptive key-value pairs
+   about nodes and streams.
+
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |          Stream ID            |  Num Entries  |   Reserved    |
+   |          Stream ID            |  Num Entries  | Meta Flags    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |        Meta Sequence          |        Total Entries          |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                   Metadata Entries                          ...|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 17: Metadata Packet
+            Figure 19: Metadata Packet
 
-   Stream ID 0x0000 = node-level metadata.
+   ABNF for metadata payload:
+
+   metadata-payload = stream-id num-entries
+                      meta-flags meta-seq
+                      total-entries
+                      *metadata-entry
+
+   stream-id      = 2OCTET  ; 0x0000 = node-level
+   num-entries    = OCTET   ; entries in this packet
+   meta-flags     = OCTET
+   meta-seq       = 2OCTET  ; big-endian
+   total-entries  = 2OCTET  ; big-endian
+   metadata-entry = key-length value-length
+                    key-data value-data
+   key-length     = OCTET   ; 1..255
+   value-length   = 2OCTET  ; big-endian, 0..65535
+   key-data       = 1*255OCTET ; UTF-8
+   value-data     = *65535OCTET ; UTF-8 or binary
+
+   Field definitions:
+
+   Stream ID:  16 bits.  0x0000 = node-level
+      metadata.  Non-zero = stream-level metadata
+      for the specified stream.
+
+   Num Entries:  8 bits.  Number of metadata entries
+      in this packet.
+
+   Meta Flags:  8 bits.
+
+      Bit 0:  Complete.  1 = this packet contains
+              all metadata for the stream/node.
+              0 = metadata is fragmented across
+              multiple packets.
+      Bit 1:  Refresh.  1 = this metadata supersedes
+              all previously received metadata for
+              this stream/node.
+      Bits 2-7:  Reserved.  MUST be zero.
+
+   Meta Sequence:  16 bits.  Sequence number for
+      ordering fragmented metadata.
+
+   Total Entries:  16 bits.  Total number of entries
+      across all fragments.
 
 12.2.  Metadata Entry Encoding
 
-   Each entry:
+   Each entry is encoded as:
 
-      [key_length: 1 octet]
-      [value_length: 2 octets]
-      [key: key_length octets, UTF-8]
-      [value: value_length octets, UTF-8]
+      [key_length:   1 octet]
+      [value_length: 2 octets, big-endian]
+      [key:          key_length octets, UTF-8]
+      [value:        value_length octets]
 
    Maximum key length: 255 octets.
    Maximum value length: 65535 octets.
 
+   Keys MUST be valid UTF-8.  Keys are
+   case-sensitive.
+
+   Values are UTF-8 by default.  Binary values
+   are permitted when the key definition specifies
+   binary encoding.
+
+   Duplicate keys within the same stream/node
+   context are not permitted.  If a receiver
+   encounters a duplicate key, the later value
+   MUST replace the earlier one.
+
 12.3.  Standard Metadata Keys
 
-   +------------------+----------------------------------+
-   | Key              | Description                      |
-   +------------------+----------------------------------+
-   | "vendor"         | Manufacturer name                |
-   | "model"          | Model identifier                 |
-   | "firmware"       | Firmware version                 |
-   | "serial"         | Serial number                    |
-   | "location"       | Physical location                |
-   | "purpose"        | Intended use                     |
-   | "icon"           | URL or data URI for icon         |
-   +------------------+----------------------------------+
+   +------------------+------+--------------------------+
+   | Key              | Type | Description              |
+   +------------------+------+--------------------------+
+   | "vendor"         | UTF8 | Manufacturer name        |
+   | "model"          | UTF8 | Device model identifier  |
+   | "firmware"       | UTF8 | Firmware version string  |
+   | "serial"         | UTF8 | Serial number            |
+   | "location"       | UTF8 | Physical location        |
+   | "purpose"        | UTF8 | Intended use             |
+   | "icon"           | UTF8 | URL or data: URI         |
+   | "channels.in"    | UTF8 | Input channel count      |
+   | "channels.out"   | UTF8 | Output channel count     |
+   | "latency.min"    | UTF8 | Minimum latency (us)     |
+   | "latency.max"    | UTF8 | Maximum latency (us)     |
+   | "sample.rates"   | UTF8 | Supported rates (CSV)    |
+   | "bit.depths"     | UTF8 | Supported depths (CSV)   |
+   +------------------+------+--------------------------+
 
-            Table 10: Standard Metadata Keys
+            Table 13: Standard Metadata Keys
 
-   Vendor-specific keys MUST use reverse-domain
-   notation (e.g., "com.example.custom-key").
+12.4.  Vendor Key Naming Rules
+
+   Vendor-specific metadata keys MUST use reverse
+   domain notation:
+
+      <reversed-domain>.<key-name>
+
+   Examples:
+
+      "tv.datanoise.firmware.build"
+      "tv.datanoise.hw.revision"
+      "com.example.custom-feature"
+
+   Vendor keys MUST NOT collide with standard keys.
+   Standard keys are always unprefixed single words
+   or dotted lowercase identifiers without a domain
+   component.
+
+12.5.  Metadata Caching and Refresh
+
+   Receivers SHOULD cache metadata indexed by
+   (Source UID, Stream ID, Key).
+
+   Cache invalidation:
+
+      When a METADATA packet with the Refresh flag
+      (bit 1) is received, the receiver MUST discard
+      all previously cached metadata for that
+      (Source UID, Stream ID) pair and replace it
+      with the new entries.
+
+   Refresh timing:
+
+      Nodes SHOULD retransmit complete metadata
+      at least once every 10 seconds.
+
+      On any metadata change, the node MUST
+      immediately transmit an updated METADATA
+      packet with the Refresh flag set.
 
 
 13.  Latency Measurement
 
 13.1.  Ping Message (Type 0x40)
 
-   Payload: 8 octets.
+   A node measures round-trip time to another node
+   by sending a Ping and waiting for a Pong.
+
+   Payload: 16 octets.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Target UID                             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
-   |             Sender Timestamp (64 bits, ns)                    |
+   |           Sender Timestamp (64 bits, ns)                      |
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Ping Sequence                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-            Figure 18: Ping Message
+            Figure 20: Ping Message
 
-   The Sender Timestamp is the sender's PTP time at
-   transmission.
+   Target UID:  32 bits.  The node to ping.
+      0x00000000 is not permitted (cannot broadcast
+      ping).
+
+   Sender Timestamp:  64 bits.  The sender's PTP
+      time at transmission, in nanoseconds.
+
+   Ping Sequence:  32 bits.  Monotonically
+      increasing per sender.  Used to match Pong
+      responses.
 
 13.2.  Pong Message (Type 0x41)
 
-   Payload: exact echo of the Ping payload (8 octets).
+   Payload: 24 octets.
 
-   The receiver MUST transmit the Pong within
-   1 millisecond of receiving the Ping.
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Pinger UID                             |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   |         Echoed Sender Timestamp (64 bits, ns)                 |
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Echoed Ping Sequence                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   |         Responder Timestamp (64 bits, ns)                     |
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+            Figure 21: Pong Message
+
+   Pinger UID:  32 bits.  Copied from the Ping's
+      Source UID (common header).
+
+   Echoed Sender Timestamp:  64 bits.  Copied from
+      the Ping.
+
+   Echoed Ping Sequence:  32 bits.  Copied from
+      the Ping.
+
+   Responder Timestamp:  64 bits.  The responder's
+      PTP time at Pong transmission.
+
+   The receiver of a Ping MUST transmit the Pong
+   within 1 millisecond.  If the node cannot meet
+   this deadline, it MUST discard the Ping.
 
 13.3.  Round-Trip Computation
 
-   The sender computes:
+   The ping sender computes RTT as:
 
-      RTT = current_PTP_time - echoed_timestamp
+      T1 = Sender Timestamp (from Ping)
+      T2 = Responder Timestamp (from Pong)
+      T3 = PTP time when Pong is received
 
-   Estimated one-way (symmetric path assumption):
+      RTT = T3 - T1
 
-      one_way = RTT / 2
+   Estimated one-way delay (symmetric assumption):
 
-   For asymmetric paths, use PTP path delay instead.
+      D_oneway = RTT / 2
+
+   Processing delay at responder:
+
+      D_proc = T2 - T1 - D_oneway  (approximate)
+
+   Smoothed RTT (exponential moving average):
+
+      SRTT = SRTT + (RTT - SRTT) / 8
+
+   Implementations SHOULD send Pings at 1 Hz
+   (one per second) per target node.
 
 13.4.  Jitter Estimation
 
-   Listeners SHOULD compute interarrival jitter per
-   [RFC3550] Section 6.4.1:
+   Interarrival jitter is computed per the
+   algorithm in [RFC3550] Section 6.4.1.
 
-      D(i,j) = (Rj - Ri) - (Sj - Si)
+   For consecutive audio packets i and j:
 
-   Where R = arrival time, S = presentation time.
+      D(i,j) = (R_j - R_i) - (S_j - S_i)
+
+   Where:
+
+      R_j = PTP time of arrival of packet j
+      R_i = PTP time of arrival of packet i
+      S_j = Presentation timestamp of packet j
+      S_i = Presentation timestamp of packet i
+
+   The jitter estimator is updated as:
 
       J(i) = J(i-1) + (|D(i,j)| - J(i-1)) / 16
 
-   Implementations SHOULD also track peak, minimum,
-   and maximum jitter, and packet loss count, loss
-   ratio, and late packet count.
+   This is equivalent to:
+
+      J(i) = (15/16) * J(i-1) + (1/16) * |D(i,j)|
+
+   The factor 1/16 provides a time constant of
+   approximately 16 packet intervals.
+
+   Additional statistics that implementations
+   SHOULD track:
+
+   -  J_peak: maximum |D(i,j)| over the last
+      256 measurements.
+   -  J_min: minimum |D(i,j)| over the last
+      256 measurements.
+   -  J_rms: root-mean-square jitter over the
+      last 256 measurements:
+
+         J_rms = sqrt(sum(D(i,j)^2) / 256)
+
+   -  Loss count: total packets lost.
+   -  Loss ratio: lost / (received + lost).
+   -  Late count: packets arriving after PTS.
+
+13.5.  Measurement Filtering
+
+   Implementations SHOULD discard outlier RTT
+   measurements that exceed 3 * SRTT.  These
+   may be caused by transient network congestion
+   and would corrupt the jitter estimate.
+
+   After filtering, the SRTT SHOULD be computed
+   using a minimum of 8 samples.
+
+13.6.  Reporting Requirements
+
+   Implementations MUST maintain per-stream
+   statistics and make them available to the
+   application:
+
+   -  Current RTT (last measurement).
+   -  Smoothed RTT.
+   -  Interarrival jitter (J).
+   -  Packet loss count and ratio.
+   -  Late packet count.
+   -  Buffer fill level (samples).
+
+   These statistics MUST be updated at least once
+   per second.
 
 
 14.  Error Handling
+
+   This section specifies the REQUIRED behavior
+   for all error conditions.
 
 14.1.  Unknown Packet Types
 
    A receiver MUST silently discard packets with
    unrecognized Pkt Type values.  The receiver
-   MUST NOT close connections, reset state, or send
-   error responses.
+   MUST NOT close connections, reset state, send
+   error responses, or log at a rate exceeding
+   1 message per second.
+
+   A counter of discarded packets MUST be
+   maintained.
 
 14.2.  Version Mismatch
 
-   A receiver MUST silently discard packets with a
-   Version field that does not match any version it
-   supports.
+   A receiver MUST silently discard packets with
+   a Version field that does not match any version
+   it supports.
+
+   If more than 50% of received packets in any
+   10-second window have an unsupported version,
+   the implementation SHOULD notify the application
+   of a possible version mismatch on the network.
 
 14.3.  CRC Failure
 
-   (LVDS only) Frames with CRC-32 mismatch MUST be
-   discarded entirely.  Implementations MUST count
-   CRC errors.  If the error rate exceeds 1 per
-   1000 frames sustained over 10 seconds, the
-   implementation SHOULD report a link quality
-   warning.
+   LVDS transport:
+
+      Frames with CRC-32 mismatch MUST be discarded
+      in their entirety.  No partial data from a
+      corrupted frame may be used.
+
+      Implementations MUST maintain a CRC error
+      counter.
+
+      If the CRC error rate exceeds 1 per 1000
+      frames (0.1%) sustained over 10 seconds, the
+      implementation MUST report a link quality
+      warning to the application.
+
+      If the CRC error rate exceeds 1 per 100
+      frames (1%) sustained over 5 seconds, the
+      implementation SHOULD attempt link
+      reinitialization (increase guard time, retry
+      CDR synchronization).
+
+   Ethernet transport:
+
+      Ethernet FCS checking is performed by hardware.
+      Corrupted frames are discarded by the MAC
+      before reaching the AudioBus stack.
 
 14.4.  Sequence Gaps
 
-   Listeners MUST track expected sequence numbers.
-   A gap indicates one or more lost packets.  The
-   listener MUST:
+   Listeners MUST track the expected sequence
+   number for each stream.  On detection of a gap:
 
-   1.  Increment the lost packet counter by the
-       gap size.
-   2.  Apply packet loss concealment (Section 10.8).
-   3.  Continue processing from the new sequence
-       number.
+   1.  Compute gap size:
+       gap = (received_seq - expected_seq) mod 65536
+       If gap > 32768, the packet is stale; discard.
+
+   2.  Increment lost-packet counter by gap.
+
+   3.  For each missing packet, generate concealment
+       audio per Section 10.8.
+
+   4.  Update expected to (received_seq + 1)
+       mod 65536.
+
+   5.  Continue normal processing of the received
+       packet.
+
+   If consecutive gaps accumulate to more than
+   100 ms of audio (e.g., 100 packets at 1 ms
+   interval), the implementation MUST:
+
+   -  Fade audio to silence.
+   -  Notify the application.
+   -  Reset the sequence tracker.
+   -  Wait for the next packet before resuming.
 
 14.5.  Late Packets
 
    Audio packets arriving after their presentation
-   timestamp MUST be counted in late-packet
-   statistics.  The audio data SHOULD be discarded.
+   timestamp MUST be counted in the late-packet
+   counter.
+
+   Soft late (within 1 ms after PTS):
+
+      The implementation MAY play the audio
+      immediately if the playout buffer can absorb
+      the timing error.
+
+   Hard late (more than 1 ms after PTS):
+
+      The audio data MUST be discarded.
 
    If more than 10% of packets in any 1-second
-   window are late, the implementation SHOULD
-   report a latency warning to the application.
+   window are late:
+
+   1.  Report a latency warning to the application.
+
+   2.  Implementations SHOULD increase the
+       presentation latency by 500 us and notify
+       the application.
+
+   3.  If the late ratio exceeds 50%, the
+       implementation MUST increase presentation
+       latency to the maximum configured value or
+       notify the application to take corrective
+       action.
 
 14.6.  Grandmaster Loss
 
-   If no PTP Sync is received for 3 * Sync interval
-   (375 ms), the node MUST:
+   If no PTP Sync is received for 3 consecutive
+   Sync intervals (3 * 125 ms = 375 ms):
 
    1.  Declare the grandmaster unreachable.
-   2.  Re-run the BMC algorithm (Section 7.2).
-   3.  If this node becomes grandmaster, begin
-       transmitting Sync within 125 ms.
-   4.  Continue audio playout using the last known
-       clock offset (holdover mode).
 
-   Holdover accuracy depends on the local oscillator.
-   At 50 ppm, drift is approximately 50 microseconds
-   per second.
+   2.  Enter clock holdover mode: continue using
+       the last computed clock offset and drift
+       rate.
+
+   3.  Re-run the BMC algorithm (Section 7.2)
+       using the beacons from remaining nodes.
+
+   4.  If this node wins BMC, begin transmitting
+       PTP Sync within 125 ms.
+
+   5.  Continue audio playout without interruption.
+
+   Holdover accuracy:
+
+      The holdover drift rate depends on the local
+      oscillator frequency stability:
+
+      +-------------+------------------+
+      | Oscillator  | Drift Rate       |
+      +-------------+------------------+
+      | 50 ppm      | 50 us/s          |
+      | 25 ppm      | 25 us/s          |
+      | 1 ppm       | 1 us/s           |
+      | TCXO (0.5)  | 0.5 us/s         |
+      +-------------+------------------+
+
+            Table 14: Holdover Drift Rates
+
+      At 50 ppm, sample clocks will drift by 1
+      sample (20.83 us at 48 kHz) in approximately
+      417 ms.
+
+      Implementations SHOULD support holdover for
+      at least 2 seconds without audible artifacts.
+
+14.7.  Malformed Packets
+
+   A packet is malformed if:
+
+   -  The Payload Length field exceeds the actual
+      remaining data in the packet.
+   -  A required field contains a value outside
+      its defined range.
+   -  The packet is shorter than the minimum
+      length for its type.
+
+   Malformed packets MUST be discarded silently.
+   A counter MUST be maintained.
+
+14.8.  Oversized Packets
+
+   A packet exceeding the transport MTU is invalid.
+
+   Ethernet:  Packets exceeding the negotiated MTU
+      (typically 1500 or 9000 octets) are dropped
+      by the network.
+
+   LVDS:  Frames exceeding the TDM frame size
+      (1024 or 512 octets) MUST be discarded by
+      the receiver.
+
+   Implementations MUST NOT generate oversized
+   packets.
+
+14.9.  Resource Exhaustion
+
+   If a node cannot allocate resources (memory,
+   buffers, processing time) for a new stream or
+   tunnel:
+
+   1.  The node MUST NOT subscribe to additional
+       streams.
+   2.  The node SHOULD set Listener Slots to 0 in
+       its beacon.
+   3.  Existing streams MUST NOT be affected.
+
+   If existing streams cannot be serviced due to
+   resource pressure:
+
+   1.  Drop the most recently subscribed stream
+       first (LIFO).
+   2.  Notify the application.
+   3.  Update the beacon to reflect reduced
+       capacity.
+
+14.10. Multicast Storm Protection
+
+   Implementations MUST implement the following
+   self-policing mechanisms:
+
+   1.  Rate limiting:  A node MUST NOT transmit
+       more than 1000 non-audio packets per second.
+
+   2.  Audio rate limiting:  A stream's audio
+       packet rate MUST NOT exceed:
+
+          max_pps = 1,000,000 / packet_interval_us
+
+       with a tolerance of +5%.
+
+   3.  Beacon suppression:  If a node receives
+       beacons from more than 64 unique UIDs, it
+       MUST stop processing beacons from new nodes
+       and log a warning.
+
+   4.  Multicast group limiting:  A node MUST NOT
+       join more than 64 stream multicast groups
+       simultaneously.
+
+14.11. Clock Holdover Behavior
+
+   During grandmaster loss (Section 14.6), nodes
+   operate in holdover mode.
+
+   The holdover algorithm:
+
+   1.  Maintain the last computed frequency offset
+       (in ppb) from the PTP servo loop.
+
+   2.  Continue incrementing the local PTP estimate
+       using the free-running local oscillator
+       adjusted by the stored frequency offset.
+
+   3.  If a new grandmaster is elected within the
+       holdover period, smoothly transition to the
+       new time base using a linear slew of no more
+       than 1 ppm (1 us/s) to avoid audible glitches.
+
+   4.  If holdover exceeds 10 seconds, declare clock
+       free-running and notify the application.
+
+14.12. Link Failure Recovery (LVDS)
+
+   On detection of CDR lock loss on an LVDS port:
+
+   1.  The node MUST cease transmission on the
+       affected port within 1 frame period.
+
+   2.  The node MUST notify the master via the
+       remaining active port (upstream).
+
+   3.  The master MUST re-run discovery for the
+       affected chain segment.
+
+   4.  If the master's only link fails, it enters
+       standalone mode and continues local audio
+       processing.
+
+   5.  On CDR re-lock, the node MUST wait for 10
+       consecutive valid frames before resuming
+       normal operation.
 
 
 15.  Extensibility and Versioning
 
-15.1.  Version Field
+15.1.  Version Negotiation
 
    The Version field in the common header enables
-   future protocol revisions.  A receiver supporting
-   version N MAY also support version N-1 for
-   backwards compatibility, but this is OPTIONAL.
+   future protocol revisions.
 
-   When a node receives a packet with a higher
-   version than it supports, it MUST silently
-   discard it.
+   Version 1:  This specification.
+
+   Version 0:  Reserved (MUST NOT be used).
+
+   A node supporting version N MAY also support
+   version N-1 for backwards compatibility, but
+   this is OPTIONAL.
+
+   When a node receives a packet with a version
+   higher than it supports, it MUST silently
+   discard the packet.  The node MUST NOT attempt
+   to interpret the payload.
+
+   Version negotiation procedure:
+
+   1.  On receiving a beacon with a different
+       version, the node records the version.
+
+   2.  If all nodes on the network support
+       version N+1, a node MAY begin transmitting
+       version N+1 packets.
+
+   3.  A node MUST NOT transmit version N+1 packets
+       unless it has received at least one beacon
+       from every known node indicating support for
+       version N+1.
 
 15.2.  Reserved Fields
 
    All fields marked "Reserved" in this document
-   MUST be set to zero on transmission and MUST be
-   ignored on reception.  This ensures forward
-   compatibility as reserved fields are assigned
-   meaning in future versions.
+   MUST be set to zero on transmission and MUST
+   be ignored on reception.
+
+   This ensures forward compatibility.  Future
+   versions may assign meaning to reserved fields.
+   Implementations MUST NOT reject packets that
+   have non-zero reserved fields.
 
 15.3.  Private-Use Ranges
 
    Packet types 0x50 through 0x7F are designated
    for private use.  Implementations MAY use these
-   for vendor-specific extensions.  Private-use
-   packets MUST still carry a valid common header.
+   for vendor-specific extensions.
+
+   Private-use packets MUST carry a valid common
+   header (Section 4.1).  The Source UID and
+   Sequence Number fields MUST be set correctly.
 
    Tunnel types 5 through 15 are available for
    future standardization or private use.
 
+   Private-use tunnel types (8-15) MAY be used
+   without registration.  Tunnel types 5-7 are
+   reserved for future Standards Action.
 
-16.  Security Considerations
+15.4.  Feature Negotiation
 
-16.1.  Threat Model
+   Nodes advertise capabilities via the beacon
+   Flags and Tunnel Caps fields (Section 8.1).
+
+   A node MUST NOT send tunnel packets of a type
+   not supported by the target (as indicated in
+   the target's beacon Tunnel Caps field).
+
+   A node MUST NOT subscribe to a stream with
+   parameters it cannot support (e.g., unsupported
+   sample rate or bit depth).
+
+
+16.  Conformance
+
+16.1.  Minimum Conformance Requirements
+
+   A conformant AudioBus implementation MUST:
+
+   1.  Implement the common header format
+       (Section 4.1).
+
+   2.  Implement at least one transport
+       (Ethernet or LVDS).
+
+   3.  Implement beacon transmission and reception
+       (Section 8).
+
+   4.  Implement node expiry (Section 8.5).
+
+   5.  Implement stream announcement reception
+       (Section 9.1).
+
+   6.  Implement audio packet transmission or
+       reception (Section 10.1).
+
+   7.  Implement PTP clock synchronization as a
+       slave (Section 7).
+
+   8.  Support linear PCM encoding at 48 kHz,
+       24-bit, with 1000 us packet interval.
+
+   9.  Implement the error handling behaviors
+       in Section 14.
+
+   10. Implement the security considerations
+       relevant to the transport in Section 17.
+
+16.2.  Conformance Levels
+
+   Level 1 - Listener (minimum):
+
+      MUST receive and decode audio streams.
+      MUST implement PTP slave.
+      MUST process beacons.
+      MUST send subscriptions.
+
+   Level 2 - Talker:
+
+      All of Level 1, plus:
+      MUST publish stream announcements.
+      MUST transmit audio packets.
+      MUST support PTP grandmaster candidacy.
+
+   Level 3 - Full:
+
+      All of Level 2, plus:
+      MUST support at least one tunnel type.
+      MUST support metadata.
+      MUST support latency measurement (Ping/Pong).
+      MUST support dynamic channel count changes.
+
+   Level 4 - Bridge:
+
+      All of Level 3, plus:
+      MUST support both Ethernet and LVDS.
+      MUST forward streams between transports.
+      MUST relay PTP across transport boundaries.
+
+   OPTIONAL features (any level):
+
+   -  GPIO tunnel
+   -  MIDI tunnel
+   -  SPI tunnel
+   -  I2C tunnel
+   -  Sideband channel
+   -  Multiple simultaneous streams
+   -  Jumbo frame support
+   -  44.1 kHz sample rate family
+   -  88.2/96 kHz sample rates
+   -  16-bit and 32-bit sample depths
+
+16.3.  Interoperability Requirements
+
+   All conformant implementations MUST
+   interoperate at the following baseline
+   configuration:
+
+   -  48 kHz sample rate
+   -  24-bit sample depth
+   -  1000 us packet interval
+   -  Linear PCM encoding
+   -  2 ms presentation latency
+
+   Implementations MUST gracefully handle
+   announcements for configurations they do not
+   support by ignoring unsupported streams
+   (not by crashing or entering an error state).
+
+
+17.  Security Considerations
+
+   This section analyzes security threats and
+   provides mitigations in accordance with
+   [RFC3552].
+
+17.1.  Threat Model
 
    AudioBus is designed for trusted local-area
-   networks.  The primary threats are:
+   networks.  The security boundary is the Layer 2
+   broadcast domain.
 
-   -  Unauthorized injection of audio or control data
-   -  Eavesdropping on audio content
-   -  Denial of service via packet flooding
-   -  Clock disruption via rogue PTP messages
-   -  Unauthorized remote control via tunnel packets
+   Specific attacks:
 
-16.2.  Confidentiality
+   T1. Rogue talker:  An unauthorized device
+       publishes audio streams containing malicious
+       content (noise, offensive material) or
+       high-volume data intended to overload
+       listeners.
+
+   T2. Stream hijacking:  An attacker sends
+       STREAM_ANNOUNCE for an existing Stream ID
+       with a different Source UID, redirecting
+       listeners to malicious audio.
+
+   T3. Clock attack:  An attacker injects PTP Sync
+       messages with a lower Clock Class and Priority,
+       forcing itself to become grandmaster.  It then
+       manipulates time to cause playout glitches,
+       buffer overflows, or denial of service.
+
+   T4. Tunnel injection:  An attacker sends TUNNEL
+       packets to perform unauthorized I2C/SPI
+       transactions on remote nodes, potentially
+       reprogramming DACs, erasing firmware, or
+       controlling GPIO pins connected to physical
+       actuators.
+
+   T5. Eavesdropping:  An attacker on the same
+       Layer 2 segment passively captures audio
+       content.
+
+   T6. Denial of service:  An attacker floods the
+       network with AudioBus packets, exhausting
+       switch bandwidth and node processing capacity.
+
+   T7. Replay attack:  An attacker captures and
+       retransmits valid packets at a later time.
+
+17.2.  Confidentiality
 
    AudioBus transmits all data in cleartext.  Audio
-   content and control data are visible to any device
-   on the same Layer 2 segment.
+   content, control commands, and metadata are
+   visible to any device on the same Layer 2
+   broadcast domain.
 
-   Deployments requiring confidentiality SHOULD use
-   MACsec [IEEE802.1AE] or physically isolated
-   networks.
+   Deployments requiring confidentiality SHOULD:
 
-16.3.  Integrity
+   -  Use IEEE 802.1AE MACsec [IEEE802.1AE] for
+      link-layer encryption.
+   -  Use physically isolated networks.
+   -  Use dedicated VLANs with access control.
+
+   LVDS transport provides inherent physical-layer
+   confidentiality: only devices physically
+   connected to the twisted-pair chain can observe
+   traffic.
+
+17.3.  Integrity
 
    The LVDS transport includes CRC-32 for error
    detection.  The Ethernet transport relies on
    the Ethernet FCS.
 
-   Neither mechanism provides cryptographic integrity.
-   An attacker on the same network segment can forge
-   or modify packets.
+   Neither mechanism provides cryptographic
+   integrity.  An active attacker on the same
+   network segment can forge or modify packets
+   without detection.
 
-   Deployments requiring integrity SHOULD use MACsec
-   or a future AudioBus security extension.
+   Mitigation:
 
-16.4.  Availability
+   -  MACsec provides per-frame integrity using
+      AES-GCM.
+   -  Implementations SHOULD validate that Source
+      UIDs in received packets match known node
+      UIDs from the beacon table.
+   -  Future AudioBus versions MAY define HMAC-based
+      packet authentication.
 
-   An attacker can disrupt audio by:
+17.4.  Availability
 
-   -  Flooding the network with audio packets,
-      exhausting switch bandwidth.
-   -  Injecting PTP Sync messages to disrupt clock
-      synchronization.
-   -  Sending STREAM_DELETE to tear down active
-      streams.
+   Denial of service vectors and mitigations:
 
-   Mitigations:
+   Vector: Multicast flooding.
+   Mitigation: Rate-limit AudioBus multicast groups
+      at the switch.  Implementations MUST implement
+      self-policing (Section 14.10).
 
-   -  Use dedicated VLANs for AudioBus traffic.
-   -  Use IEEE 802.1X port-based access control.
-   -  Rate-limit AudioBus multicast groups at the
-      switch.
-   -  Implementations SHOULD validate that PTP Sync
-      messages originate from the expected grandmaster
-      UID before processing.
+   Vector: PTP Sync injection.
+   Mitigation: Implementations SHOULD validate that
+      PTP Sync Source UID matches the expected
+      grandmaster.  Implementations SHOULD reject
+      Sync from unknown UIDs.
 
-16.5.  Authentication
+   Vector: STREAM_DELETE injection.
+   Mitigation: Implementations SHOULD verify that
+      STREAM_DELETE Source UID matches the stream's
+      talker UID.
 
-   AudioBus does not define an authentication
-   mechanism.  All nodes on the network are
-   implicitly trusted.
+   Vector: Beacon flooding (>64 nodes).
+   Mitigation: Node table limiting
+      (Section 14.10 item 3).
+
+17.5.  Authentication
+
+   AudioBus version 1 does not define an
+   authentication mechanism.  All nodes on the
+   network are implicitly trusted.
 
    Future versions MAY define:
 
-   -  HMAC-SHA256 authentication of the common header
-   -  Node certificate-based authentication
-   -  Authenticated PTP (Annex P of IEEE 1588-2019)
+   -  HMAC-SHA256 authentication appended to the
+      common header (8 additional octets).
+   -  Node certificate exchange during discovery.
+   -  Authenticated PTP per IEEE 1588-2019 Annex P.
+   -  Pre-shared key distribution via out-of-band
+      mechanism.
 
-16.6.  Mitigations
+17.6.  Privacy
 
-   Deployments in environments with untrusted devices
-   SHOULD implement the following:
+   Node names, vendor information, and metadata
+   are broadcast in cleartext.  This may reveal
+   information about the audio installation.
 
-   1.  Physical network isolation or VLAN separation.
-   2.  IEEE 802.1X port-based network access control.
-   3.  MACsec (IEEE 802.1AE) for link-layer
-       encryption and integrity.
-   4.  Grandmaster UID whitelisting: only accept
-       PTP Sync from known node UIDs.
-   5.  Tunnel target validation: only process tunnel
-       packets addressed to the local UID or
-       broadcast.
+   Implementations SHOULD allow administrators to
+   disable metadata transmission.
+
+   LVDS topologies have limited privacy exposure
+   since traffic is confined to the physical chain.
+
+17.7.  Specific Mitigations
+
+   Deployments in environments with untrusted
+   devices SHOULD implement the following measures,
+   in order of effectiveness:
+
+   M1. Physical isolation:
+
+      Deploy AudioBus on a dedicated physical
+      network or LVDS chain with no untrusted
+      access points.
+
+   M2. VLAN separation:
+
+      Place all AudioBus nodes on a dedicated
+      VLAN (Section 5.4).  Configure switch ports
+      for the AudioBus VLAN only.
+
+   M3. Port-based access control:
+
+      Use IEEE 802.1X to authenticate devices
+      before granting network access.
+
+   M4. Link-layer encryption:
+
+      Deploy MACsec [IEEE802.1AE] on all links
+      carrying AudioBus traffic.
+
+   M5. Grandmaster protection:
+
+      Configure a UID allowlist of permitted
+      grandmaster nodes.  Reject PTP Sync from
+      UIDs not on the list.
+
+   M6. Tunnel access control:
+
+      Process TUNNEL packets only when the Target
+      UID matches the local UID or is broadcast
+      (0x00000000).  Optionally maintain a list of
+      UIDs permitted to send tunnel packets to
+      this node.
+
+17.8.  Residual Risks
+
+   Even with all mitigations applied:
+
+   -  A compromised node on the same MACsec domain
+      can still inject or modify AudioBus traffic.
+
+   -  Physical access to an LVDS chain enables
+      traffic interception and injection.
+
+   -  Replay attacks are possible within the MACsec
+      replay window.
+
+   -  No mechanism prevents a legitimate node from
+      malfunctioning and flooding the network.
 
    Implementations MUST NOT be used in safety-
    critical systems without additional integrity
-   verification.
+   and redundancy measures.
 
 
-17.  IANA Considerations
+18.  IANA Considerations
 
-17.1.  EtherType Assignment
+   This section requests the creation of six IANA
+   registries and two IEEE Registration Authority
+   assignments.
+
+18.1.  EtherType Assignment
 
    This document requests assignment of an EtherType
-   from the IEEE Registration Authority for
-   "AudioBus Protocol."  Pending assignment, the
-   locally administered value 0x88B6 is used.
+   from the IEEE Registration Authority.
 
-17.2.  Multicast OUI Assignment
+   Name:           AudioBus Protocol
+   Reference:      Section 5.2 of this document
+   Interim value:  0x88B6 (IEEE 802 Local
+                   Experimental EtherType 1)
+   Contact:        Authors (Section Authors'
+                   Addresses)
+
+   Until a dedicated EtherType is assigned,
+   implementations MUST use 0x88B6.
+
+18.2.  Multicast OUI Assignment
 
    This document requests assignment of an Ethernet
-   multicast OUI from the IEEE Registration Authority.
-   Pending assignment, the locally administered prefix
-   01:60:AB is used.
+   multicast OUI from the IEEE Registration
+   Authority.
 
-17.3.  AudioBus Packet Type Registry
+   Name:           AudioBus Multicast
+   Reference:      Section 5.3 of this document
+   Interim prefix: 01:60:AB
+   Contact:        Authors
+
+18.3.  AudioBus Packet Type Registry
 
    IANA is requested to create the "AudioBus Packet
-   Types" registry with the initial values in
-   Table 1.
+   Types" registry.
 
-   Registration policy:
+   Registration template:
 
-   -  0x00:        Reserved.
-   -  0x01-0x4F:   Standards Action.
-   -  0x50-0x7F:   Private Use.
-   -  0x80-0xFF:   Reserved.
+      Value:        Single octet (0x00-0xFF)
+      Name:         Short name (max 20 characters)
+      Description:  Brief description
+      Reference:    Specification reference
 
-17.4.  AudioBus Tunnel Type Registry
+   Registration policies per [RFC8126]:
 
-   IANA is requested to create the "AudioBus Tunnel
-   Types" registry with the initial values in
-   Table 9.
+   +-------------+-----------------------+
+   | Range       | Policy                |
+   +-------------+-----------------------+
+   | 0x00        | Reserved              |
+   | 0x01-0x4F   | Standards Action      |
+   | 0x50-0x7F   | Private Use           |
+   | 0x80-0xEF   | Specification Req.    |
+   | 0xF0-0xFF   | Reserved              |
+   +-------------+-----------------------+
 
-   Registration policy:
+   Initial values:  Table 1 of this document.
 
-   -  0-4:    Standards Action.
-   -  5-15:   Expert Review.
+   Designated expert instructions:
 
-17.5.  AudioBus Hardware Type Registry
+      The expert SHOULD verify that the proposed
+      packet type does not duplicate functionality
+      of an existing type, that the specification
+      is sufficiently detailed for interoperable
+      implementation, and that the type has a
+      clear use case for audio networking.
+
+18.4.  AudioBus Tunnel Type Registry
 
    IANA is requested to create the "AudioBus
-   Hardware Types" registry with the initial values
-   in Table 6.
+   Tunnel Types" registry.
 
-   Registration policy:
+   Registration template:
 
-   -  0-7:    Standards Action.
-   -  8-254:  Specification Required.
-   -  255:    Private Use.
+      Value:        Single octet (0-15)
+      Name:         Short name
+      Description:  Brief description
+      Reference:    Specification reference
 
-17.6.  AudioBus Metadata Key Registry
+   Registration policies:
+
+   +--------+----------------------------+
+   | Range  | Policy                     |
+   +--------+----------------------------+
+   | 0-4    | Standards Action           |
+   | 5-7    | Standards Action           |
+   | 8-15   | Expert Review              |
+   +--------+----------------------------+
+
+   Initial values:  Table 12 of this document.
+
+   Designated expert instructions:
+
+      The expert SHOULD verify that the tunnel type
+      represents a distinct control protocol not
+      already covered by existing types.
+
+18.5.  AudioBus Hardware Type Registry
 
    IANA is requested to create the "AudioBus
-   Metadata Keys" registry with the initial values
-   in Table 10.
+   Hardware Types" registry.
 
-   Registration policy: First Come First Served.
+   Registration template:
 
-   Vendor-specific keys MUST use reverse-domain
-   notation and do not require registration.
+      Value:        Single octet (0-255)
+      Abbreviation: 3-letter code
+      Name:         Full name
+      Description:  Brief description
+      Reference:    Specification reference
 
+   Registration policies:
 
-18.  References
+   +--------+----------------------------+
+   | Range  | Policy                     |
+   +--------+----------------------------+
+   | 0-10   | Standards Action           |
+   | 11-63  | Expert Review              |
+   | 64-254 | Specification Required     |
+   | 255    | Private Use                |
+   +--------+----------------------------+
 
-18.1.  Normative References
+   Initial values:  Table 6 of this document.
 
-   [RFC2119]  Bradner, S., "Key words for use in RFCs to
-              Indicate Requirement Levels", BCP 14,
-              RFC 2119, DOI 10.17487/RFC2119,
-              March 1997,
-              <https://www.rfc-editor.org/info/rfc2119>.
+   Designated expert instructions:
 
-   [RFC8174]  Leiba, B., "Ambiguity of Uppercase vs
-              Lowercase in RFC 2119 Key Words", BCP 14,
-              RFC 8174, DOI 10.17487/RFC8174, May 2017,
-              <https://www.rfc-editor.org/info/rfc8174>.
+      The expert SHOULD verify that the hardware
+      type represents a distinct device category
+      that aids user-interface presentation or
+      automatic routing decisions.
 
-   [RFC791]   Postel, J., "Internet Protocol", STD 5,
-              RFC 791, DOI 10.17487/RFC0791,
-              September 1981,
-              <https://www.rfc-editor.org/info/rfc791>.
+18.6.  AudioBus Metadata Key Registry
 
-   [IEEE802.3]
-              IEEE, "IEEE Standard for Ethernet",
-              IEEE Std 802.3-2022.
+   IANA is requested to create the "AudioBus
+   Metadata Keys" registry.
 
-   [IEEE1588]
-              IEEE, "IEEE Standard for a Precision
-              Clock Synchronization Protocol for
-              Networked Measurement and Control Systems",
-              IEEE Std 1588-2019.
+   Registration template:
 
-18.2.  Informative References
+      Key:          UTF-8 string (max 64 chars)
+      Type:         "UTF8" or "binary"
+      Description:  Brief description
+      Reference:    Specification reference
 
-   [RFC3550]  Schulzrinne, H., Casner, S., Frederick, R.,
-              and V. Jacobson, "RTP: A Transport Protocol
-              for Real-Time Applications", STD 64,
-              RFC 3550, DOI 10.17487/RFC3550, July 2003,
-              <https://www.rfc-editor.org/info/rfc3550>.
+   Registration policy: First Come First Served
+   per [RFC8126].
 
-   [RFC3552]  Rescorla, E. and B. Korver, "Guidelines
-              for Writing RFC Text on Security
-              Considerations", BCP 72, RFC 3552,
-              DOI 10.17487/RFC3552, July 2003,
-              <https://www.rfc-editor.org/info/rfc3552>.
+   Initial values:  Table 13 of this document.
 
-   [RFC8126]  Cotton, M., Leiba, B., and T. Narten,
-              "Guidelines for Writing an IANA
-              Considerations Section in RFCs", BCP 26,
-              RFC 8126, DOI 10.17487/RFC8126, June 2017,
-              <https://www.rfc-editor.org/info/rfc8126>.
+   Keys using reverse-domain notation (vendor
+   keys) do not require registration.
 
-   [AES67]    Audio Engineering Society, "AES67-2018:
-              AES standard for audio applications of
-              networks - High-performance streaming
-              audio-over-IP interoperability", 2018.
+18.7.  AudioBus Sample Rate Registry
 
-   [TIA644]   TIA, "TIA/EIA-644: Electrical
-              Characteristics of Low Voltage
-              Differential Signaling (LVDS) Interface
-              Circuits", 2001.
+   IANA is requested to create the "AudioBus
+   Sample Rates" registry.
 
-   [IEEE802.1AE]
-              IEEE, "IEEE Standard for Local and
-              Metropolitan Area Networks: Media Access
-              Control (MAC) Security",
-              IEEE Std 802.1AE-2018.
+   Registration template:
+
+      Value:        32-bit unsigned integer (Hz)
+      Description:  Brief description
+      Reference:    Specification reference
+
+   Registration policy: Standards Action.
+
+   Initial values:
+
+   +---------+-----------------------------+
+   | Value   | Description                 |
+   +---------+-----------------------------+
+   |   44100 | 44.1 kHz family base rate   |
+   |   48000 | 48 kHz family base rate     |
+   |   88200 | 44.1 kHz family double rate |
+   |   96000 | 48 kHz family double rate   |
+   +---------+-----------------------------+
+
+18.8.  AudioBus Encoding Registry
+
+   IANA is requested to create the "AudioBus
+   Audio Encodings" registry.
+
+   Registration template:
+
+      Value:        Single octet (0-255)
+      Name:         Short name
+      Description:  Encoding specification
+      Reference:    Specification reference
+
+   Registration policy: Standards Action.
+
+   Initial values:
+
+   +-------+-----------+----------------------+
+   | Value | Name      | Description          |
+   +-------+-----------+----------------------+
+   |     0 | PCM       | Linear PCM, signed   |
+   |       |           | two's complement,    |
+   |       |           | big-endian           |
+   | 1-255 | Reserved  |                      |
+   +-------+-----------+----------------------+
 
 
 Appendix A.  Channel Capacity Tables
 
 A.1.  Ethernet Transport (100 Mbps)
 
-   +----------+---------+----------+--------------------+
-   | Rate(Hz) | Depth   | Interval | Max Channels       |
-   +----------+---------+----------+--------------------+
-   |    48000 | 32-bit  | 1000 us  | 64                 |
-   |    48000 | 24-bit  | 1000 us  | 86                 |
-   |    96000 | 32-bit  | 1000 us  | 32                 |
-   |    96000 | 24-bit  | 1000 us  | 43                 |
-   +----------+---------+----------+--------------------+
+   Maximum channels per stream, limited by MTU
+   and bandwidth.  Assumes default MTU of 1500
+   octets and the overhead structure:
+   Ethernet header (14) + AudioBus header (12) +
+   Audio header (20) = 46 octets overhead.
 
-            Table A-1: Ethernet Capacity
+   +------+-------+-------+-------+---------+------+
+   | Rate | Depth | Int.  | N/pkt | Audio B | MaxC |
+   | (Hz) | (bit) | (us)  |       | /pkt    |      |
+   +------+-------+-------+-------+---------+------+
+   |48000 |    16 |  1000 |    48 |   C*96  |   15 |
+   |48000 |    24 |  1000 |    48 |   C*144 |   10 |
+   |48000 |    32 |  1000 |    48 |   C*192 |    7 |
+   |48000 |    16 |   125 |     6 |   C*12  |  121 |
+   |48000 |    24 |   125 |     6 |   C*18  |   80 |
+   |48000 |    32 |   125 |     6 |   C*24  |   60 |
+   |96000 |    16 |  1000 |    96 |   C*192 |    7 |
+   |96000 |    24 |  1000 |    96 |   C*288 |    5 |
+   |96000 |    32 |  1000 |    96 |   C*384 |    3 |
+   |44100 |    24 |  1000 |    44 |   C*132 |   11 |
+   +------+-------+-------+-------+---------+------+
 
-A.2.  LVDS Transport (491 Mbps, per direction)
+   MaxC = floor(1454 / (N * (Depth/8)))
+   Capped at 64 (protocol maximum).
 
-   +----------+---------+----------+--------------------+
-   | Rate(Hz) | Depth   | Frame    | Max Ch/Direction   |
-   +----------+---------+----------+--------------------+
-   |    48000 | 32-bit  | 1024 B   | 64                 |
-   |    48000 | 24-bit  | 1024 B   | 64                 |
-   |    96000 | 32-bit  |  512 B   | 62                 |
-   |    96000 | 24-bit  |  512 B   | 64                 |
-   |    44100 | 32-bit  | 1024 B   | 64                 |
-   +----------+---------+----------+--------------------+
+   Note: The bandwidth limit may constrain MaxC
+   below the MTU limit.  At 100 Mbps, the total
+   aggregate of all streams must not exceed
+   approximately 90 Mbps (allowing 10% for
+   control traffic).
 
-            Table A-2: LVDS Capacity
+            Table A-1: Ethernet Capacity (MTU 1500)
+
+A.2.  Ethernet Transport (1 Gbps, Jumbo Frames)
+
+   With jumbo frames (MTU 9000) and Gigabit
+   Ethernet:
+
+   +------+-------+-------+-------+---------+------+
+   | Rate | Depth | Int.  | N/pkt | Audio B | MaxC |
+   | (Hz) | (bit) | (us)  |       | /pkt    |      |
+   +------+-------+-------+-------+---------+------+
+   |48000 |    32 |  1000 |    48 |   C*192 |   46 |
+   |48000 |    24 |  1000 |    48 |   C*144 |   62 |
+   |96000 |    32 |  1000 |    96 |   C*384 |   23 |
+   |96000 |    24 |  1000 |    96 |   C*288 |   31 |
+   +------+-------+-------+-------+---------+------+
+
+   MaxC = floor(8954 / (N * (Depth/8)))
+   Capped at 64.
+
+            Table A-2: Ethernet Capacity (Jumbo)
+
+A.3.  LVDS Transport (per direction)
+
+   Available payload per direction after overhead:
+
+      payload = (frame_bytes - OVERHEAD) / 2
+                - GUARD/2 - SIDEBAND
+
+   Where OVERHEAD = 16 bytes (sync + header +
+   guard + CRC), GUARD = 2 bytes, SIDEBAND = 1.
+
+   At 48/44.1 kHz (1024-byte frame):
+
+      per_dir = (1024 - 16) / 2 - 1 - 1 = 502 B
+
+   At 96/88.2 kHz (512-byte frame):
+
+      per_dir = (512 - 16) / 2 - 1 - 1 = 246 B
+
+   +------+-------+--------+---------+------+------+
+   | Rate | Depth | Frame  | Per Dir | MaxC | Aux  |
+   | (Hz) | (bit) | (B)    | (B)     |      | (B)  |
+   +------+-------+--------+---------+------+------+
+   |48000 |    32 |   1024 |     502 |   64 |  246 |
+   |48000 |    24 |   1024 |     502 |   64 |  310 |
+   |48000 |    16 |   1024 |     502 |   64 |  374 |
+   |96000 |    32 |    512 |     246 |   61 |    2 |
+   |96000 |    24 |    512 |     246 |   64 |   54 |
+   |96000 |    16 |    512 |     246 |   64 |  118 |
+   |44100 |    32 |   1024 |     502 |   64 |  246 |
+   |44100 |    24 |   1024 |     502 |   64 |  310 |
+   |88200 |    32 |    512 |     246 |   61 |    2 |
+   |88200 |    24 |    512 |     246 |   64 |   54 |
+   +------+-------+--------+---------+------+------+
+
+   MaxC = min(64, floor(Per_Dir / (Depth/8)))
+   Aux = Per_Dir - MaxC * (Depth/8)
+
+            Table A-3: LVDS Capacity
 
 
 Appendix B.  Recommended Hardware
 
 B.1.  Ethernet Transport
 
-   Microcontroller: Espressif ESP32-P4 (dual RISC-V
-   400 MHz, EMAC with IEEE 1588 HW timestamping).
-   PHY: IP101GRI, RTL8201, or LAN8720 (100BASE-TX
-   RMII).  Switch: any commodity 100 Mbps Ethernet
-   switch.
+   Microcontroller:
 
-B.2.  LVDS Transport (Single-Chip)
+      Espressif ESP32-P4 (dual RISC-V 400 MHz,
+      EMAC with IEEE 1588 hardware timestamping,
+      512 KB SRAM, PSRAM support).
 
-   Transceiver: TI SN65LVDT41 (single LVDS
-   transceiver, driver + receiver, ~$2).  Clock:
-   Si5351A programmable clock generator.  Cable:
-   Cat5e, single pair.  Termination: 100 ohm
-   differential.
+   Ethernet PHY:
+
+      IP101GRI, RTL8201, or LAN8720 (100BASE-TX
+      RMII).  Any MII/RMII PHY compatible with the
+      ESP32-P4 EMAC is suitable.
+
+   Switch:
+
+      Any commodity 100 Mbps or Gigabit Ethernet
+      switch.  Managed switches with IGMP snooping
+      control and VLAN support are RECOMMENDED for
+      installations with more than 8 nodes.
+
+B.2.  LVDS Transport (Single-Chip, Recommended)
+
+   Transceiver:
+
+      TI SN65LVDT41 (single LVDS transceiver with
+      integrated driver and receiver, driver enable
+      control).  Approximate cost: $2 per port.
+
+   Controller:
+
+      ESP32-P4 with PARLIO peripheral in 1-bit mode
+      at 98.304 MHz.  Uses 5 GPIO pins per port:
+      data, clock, driver enable, receiver data,
+      receiver clock.
+
+   Clock:
+
+      Si5351A programmable clock generator (master
+      and slave).  Master: generates 49.152 MHz or
+      45.1584 MHz from 25 MHz reference.  Slave:
+      software PLL locked to master frame timing.
+
+   Cable:  Cat5e or better, single pair.
+   Termination:  100 ohm differential.
 
 B.3.  LVDS Transport (Maximum Performance)
 
-   Serializer: TI DS92LV1021A (10:1 LVDS).
-   Deserializer: TI DS92LV1212A (1:10 LVDS, CDR).
-   Clock: 49.152 MHz crystal oscillator (master).
-   Cable: Cat5e, single pair.  Termination: 100 ohm
-   differential.
+   Serializer:
+
+      TI DS92LV1021A (10:1 LVDS serializer).
+      10-bit parallel input at 49.152 MHz.
+
+   Deserializer:
+
+      TI DS92LV1212A (1:10 LVDS deserializer with
+      CDR).  10-bit parallel output.  Hardware clock
+      recovery provides self-clocking operation.
+
+   Controller:
+
+      ESP32-P4 with PARLIO peripheral in 10-bit or
+      16-bit mode at 49.152 MHz.  Uses 24 GPIO pins
+      per port.
+
+   Clock:
+
+      49.152 MHz crystal oscillator (master node).
+      Slave nodes use the recovered clock from the
+      DS92LV1212A CDR.
+
+   Cable:  Cat5e or better, single pair.
+   Termination:  100 ohm differential at each end.
+
+   Approximate cost per port: $7 (serializer +
+   deserializer pair).
+
+B.4.  Audio Codec (Optional)
+
+   DAC:  PCM5102A (I2S stereo, 32-bit, 384 kHz,
+      ~$2.50).
+   ADC:  PCM1808 (I2S stereo, 24-bit, 96 kHz,
+      ~$3.00).
+   Codec:  WM8960 (I2S stereo DAC+ADC, ~$2.00).
+
+B.5.  Connectors
+
+   +------------------+-----+----------------------------+
+   | Type             |Cost | Notes                      |
+   +------------------+-----+----------------------------+
+   | RJ45             |$0.30| Use pins 1,2 (pair)        |
+   | 3.5mm TRS        |$0.20| Tip=+, Ring=-, Sleeve=GND  |
+   | JST-PH 3-pin     |$0.15| Compact, board-to-board    |
+   | Ethercon (NE8MC)  |$3.00| Ruggedized RJ45, pro audio |
+   | XLR-5 (Neutrik)  |$2.50| 5-pin, 2 for data, 1 GND  |
+   +------------------+-----+----------------------------+
+
+            Table B-1: Connector Options
 
 
-Appendix C.  Example Message Exchange
+Appendix C.  Example Message Exchanges
 
-   The following illustrates a typical Ethernet-mode
-   startup sequence between two nodes A and B on
-   the same switch.
+C.1.  Ethernet Startup Sequence
 
-   T=0.0s  A boots.
-           A joins multicast 01:60:AB:FF:FF:00.
-           A joins multicast 01:60:AB:FF:FF:01.
-           A sends BEACON (uid=0x1234, pri=128,
-              class=248, name="Node-A").
-           A assumes grandmaster (only node).
-           A begins PTP Sync at 125 ms intervals.
+   Two nodes A (UID=0x00001234) and B
+   (UID=0x00005678) on the same switch.
 
-   T=0.2s  B boots.
-           B joins multicast groups.
-           B sends BEACON (uid=0x5678, pri=128,
-              class=248, name="Node-B").
+   T=0.000s  A boots.
+             A joins 01:60:AB:FF:FF:00 (disc).
+             A joins 01:60:AB:FF:FF:01 (PTP).
+             A randomizes beacon delay: 347 ms.
 
-   T=0.2s  A receives B's beacon.
-              BMC: 0x1234 < 0x5678, A remains GM.
-           B receives A's beacon.
-              BMC: 0x1234 < 0x5678, B accepts A as GM.
+   T=0.200s  B boots.
+             B joins multicast groups.
+             B randomizes beacon delay: 812 ms.
 
-   T=0.3s  A sends PTP Sync (seq=1).
-           A sends PTP Follow_Up (seq=1, precise_ts).
-           B receives Sync, records t2.
-           B receives Follow_Up, records t1.
+   T=0.347s  A sends BEACON:
+               Version=1, PktType=0x02,
+               Seq=0, SrcUID=0x00001234,
+               PayloadLen=27,
+               NodeUID=0x00001234,
+               NameLen=6, HWType=4 (ABR),
+               TalkerStreams=0,ListenerSlots=4,
+               PTPPri=128, PTPClass=248,
+               Flags=0x0004 (Ethernet capable),
+               MaxCh=2, TunnelCaps=0x0C,
+               Uptime=0, Name="Node-A".
+             A assumes grandmaster (only node).
+             A begins PTP Sync at 125 ms.
 
-   T=0.5s  B sends Delay_Req (seq=1), records t3.
-           A receives Delay_Req, records t4.
-           A sends Delay_Resp (seq=1, t4, uid=0x5678).
-           B computes offset and delay.
+   T=0.347s  A sends PTP_SYNC:
+               Seq=0, PTPSeq=0,
+               OriginTS=347000000.
 
-   T=1.0s  A creates stream "Node-A Stereo"
-              (id=0x1230, 2ch, 48kHz, 32-bit).
-           A sends STREAM_ANNOUNCE.
-           A joins 01:60:AB:12:30:00.
-           A begins sending AUDIO packets.
+   T=0.350s  A sends PTP_FOLLOW_UP:
+               PTPSeq=0,
+               PreciseTS=347128456.
 
-   T=1.0s  B receives stream announcement.
-           B sends SUBSCRIBE (stream=0x1230,
-              talker=0x1234, mask=0 (all ch)).
-           B joins 01:60:AB:12:30:00.
+   T=1.012s  B sends BEACON:
+               SrcUID=0x00005678,
+               NameLen=6, HWType=1 (SPK),
+               TalkerStreams=0,ListenerSlots=2,
+               PTPPri=128, PTPClass=248,
+               Flags=0x0004,
+               MaxCh=2, TunnelCaps=0x04,
+               Uptime=0, Name="Node-B".
 
-   T=1.001s B receives first AUDIO packet.
-            B buffers audio, waits for PTS.
+   T=1.012s  A receives B's beacon.
+             BMC: Both class=248, pri=128.
+             Tiebreak: 0x1234 < 0x5678.
+             A remains grandmaster.
 
-   T=1.003s PTS reached.  B begins playout.
+   T=1.012s  B receives A's beacon (from T=0.347).
+             BMC: 0x1234 < 0x5678.
+             B accepts A as grandmaster.
 
-            Figure C-1: Example Startup Sequence
+   T=1.100s  B sends PTP_DELAY_REQ:
+               PTPSeq=0.
+             B records t3=1100000000 ns.
+
+   T=1.100s  A receives Delay_Req.
+             A records t4=1100080000 ns.
+             A sends PTP_DELAY_RESP:
+               PTPSeq=0, RxTS=1100080000,
+               RequesterUID=0x00005678.
+
+   T=1.100s  B receives Delay_Resp.
+             B computes:
+               t1 = 347128456 (Follow_Up)
+               t2 = 347208000 (local HW rx)
+               t3 = 1100000000
+               t4 = 1100080000
+               offset = ((t2-t1)-(t4-t3))/2
+                      = (79544 - 80000) / 2
+                      = -228 ns
+               delay  = (79544 + 80000) / 2
+                      = 79772 ns (~80 us)
+
+   T=1.500s  A creates stream:
+             id=0x0001, 2ch, 48kHz, 24-bit,
+             1000us interval, name="Main Out".
+             A sends STREAM_ANNOUNCE.
+             A joins 01:60:AB:00:01:00.
+             A begins sending AUDIO packets.
+
+   T=1.500s  B receives STREAM_ANNOUNCE.
+             B sends SUBSCRIBE:
+               StreamID=0x0001,
+               SubSeq=0,
+               TalkerUID=0x00001234,
+               ChMaskLen=0 (all channels).
+             B joins 01:60:AB:00:01:00.
+
+   T=1.501s  B receives first AUDIO packet:
+               PTS = 1503000000 ns
+               (2 ms presentation latency).
+             B buffers audio.
+
+   T=1.503s  PTS reached.  B begins playout.
+
+            Figure C-1: Ethernet Startup Sequence
+
+C.2.  LVDS Stream Creation
+
+   Master M, slave S1 (node_id=1), slave S2
+   (node_id=2).  Configuration: 48 kHz, 24-bit.
+
+   T=0.000s  M boots, enters DISCOVERY state.
+             M sends DISCOVERY frame:
+               frame_type=0x01,
+               sub_type=0x01 (BEACON),
+               target_node_id=1.
+
+   T=0.001s  S1 receives beacon on upstream port.
+             S1 CDR locked. S1 responds:
+               sub_type=0x02 (RESPONSE),
+               node_descriptor: uid=0xA001,
+               hw_type=3, max_dn=2, max_up=2,
+               depth=24, tunnel_req=0x08 (MIDI),
+               tunnel_bw=3.
+
+   T=0.002s  M receives response.
+             M sends ASSIGN: node_id=1.
+             S1 stores node_id=1.
+             S1 enables downstream port.
+
+   T=0.003s  M sends BEACON: target_node_id=2.
+
+   T=0.004s  S2 receives beacon via S1.
+             S2 responds: uid=0xA002,
+               hw_type=1, max_dn=2, max_up=0,
+               depth=24, tunnel_req=0x00.
+
+   T=0.005s  M assigns node_id=2.
+
+   T=0.006s  M sends BEACON: target_node_id=3.
+             No response within 50 ms.
+
+   T=0.056s  Discovery complete. 2 slaves found.
+             M computes slot map:
+               DN: sideband(1) + S1_dn(6) +
+                   S2_dn(6) + S1_midi(3) = 16 B
+               Guard: 2 B
+               UP: sideband(1) + S1_up(6) +
+                   S1_midi(3) = 10 B
+             M sends CONFIG frame with slot map.
+
+   T=0.057s  S1 receives CONFIG, ACKs.
+   T=0.058s  S2 receives CONFIG, ACKs.
+
+   T=0.060s  M enters RUNNING state.
+             First audio frame transmitted.
+
+            Figure C-2: LVDS Discovery Sequence
+
+C.3.  Subscription to Subset of Channels
+
+   Node B subscribes to channels 0 and 1 (left
+   and right) of a 16-channel stream from node A.
+
+   B sends SUBSCRIBE:
+     StreamID    = 0x0042
+     SubSeq      = 5
+     TalkerUID   = 0x00001234
+     ChMaskLen   = 2  (2 octets = 16 bits)
+     ChBitmask   = 0x03 0x00
+                   (bits 0 and 1 set = ch 0, ch 1)
+
+   B joins multicast 01:60:AB:00:42:00.
+   B receives AUDIO packets containing all 16
+   channels but only decodes channels 0 and 1.
+
+C.4.  Grandmaster Failover
+
+   Three nodes: A (UID=0x1000, GM), B (0x2000),
+   C (0x3000).  A fails at T=5.0s.
+
+   T=5.000s  A crashes.  No more PTP Sync or
+             beacons from A.
+
+   T=5.375s  B and C detect: no Sync for 375 ms.
+             Both enter holdover mode.
+             Both re-run BMC.
+             B: UID=0x2000, C: UID=0x3000.
+             B wins (lower UID).
+
+   T=5.500s  B begins transmitting PTP Sync as
+             new grandmaster.
+             B sets grandmaster flag in beacon.
+
+   T=5.500s  C receives B's Sync.
+             C exits holdover.
+             C performs PTP offset computation
+             against B.
+
+   T=8.000s  No beacon from A for 3000 ms.
+             B and C remove A from node table.
+             B and C release subscriptions to
+             A's streams.
+
+   Audio playout on B and C is uninterrupted
+   throughout the failover.
+
+            Figure C-3: Grandmaster Failover
+
+C.5.  Node Departure (Graceful)
+
+   Node B (listener) is powered down gracefully.
+
+   T=10.0s  B sends UNSUBSCRIBE for all streams.
+            B leaves all stream multicast groups.
+            B stops transmitting beacons.
+
+   T=13.0s  Other nodes detect: no beacon from B
+            for 3000 ms.
+            B is removed from all node tables.
+            If B was grandmaster, BMC is re-run.
+
+            Figure C-4: Graceful Node Departure
+
+
+Appendix D.  Test Vectors
+
+   This appendix provides hex dumps of example
+   packets for each packet type.  All values are
+   shown in hexadecimal.  Multi-octet fields are
+   big-endian.
+
+D.1.  Common Header
+
+   A common header with Version=1, PktType=0x01
+   (AUDIO), Flags=0x0000, SourceUID=0x00001234,
+   Seq=0x0001, PayloadLen=0x0114 (276):
+
+   01 01 00 00 00 00 12 34 00 01 01 14
+
+D.2.  Beacon Packet
+
+   Complete beacon from node UID=0x00001234,
+   Name="Node-A", HWType=4, PTPPri=128,
+   Class=248:
+
+   Common header:
+   01 02 00 00 00 00 12 34 00 00 00 1E
+
+   Beacon payload:
+   00 00 12 34    ; Node UID
+   06             ; Name Len = 6
+   04             ; HW Type = ABR
+   01             ; Talker Streams = 1
+   04             ; Listener Slots = 4
+   80             ; PTP Priority = 128
+   F8             ; PTP Clock Class = 248
+   00 04          ; Flags (Ethernet capable)
+   02             ; Max Channels = 2
+   0C             ; Tunnel Caps (GPIO+MIDI)
+   00 05          ; Uptime = 5 seconds
+   4E 6F 64 65 2D 41  ; "Node-A" (UTF-8)
+
+   Full packet (30 octets payload):
+   01 02 00 00 00 00 12 34 00 00 00 1E
+   00 00 12 34 06 04 01 04 80 F8 00 04
+   02 0C 00 05 4E 6F 64 65 2D 41
+
+D.3.  Stream Announcement
+
+   Stream ID=0x0001, 2ch, 24-bit, 48kHz,
+   1000us, PCM, name="Stereo":
+
+   Common header:
+   01 05 00 00 00 00 12 34 00 01 00 1C
+
+   Announcement payload:
+   00 01          ; Stream ID
+   02             ; Channels = 2
+   18             ; Bit Depth = 24
+   00 00 BB 80    ; Sample Rate = 48000
+   03 E8          ; Packet Interval = 1000 us
+   00             ; Encoding = PCM
+   06             ; Name Len = 6
+   00 01          ; Stream Flags (Active)
+   00 00          ; Reserved
+   53 74 65 72 65 6F  ; "Stereo"
+   01 4C          ; Ch 0 label: len=1, "L"
+   01 52          ; Ch 1 label: len=1, "R"
+
+D.4.  Audio Packet
+
+   Stream 0x0001, 2ch, 24-bit, 48kHz, 6 samples
+   (125 us interval), PTS = 1,500,000,000 ns.
+   All samples = silence (0x000000):
+
+   Common header:
+   01 01 00 00 00 00 12 34 00 05 00 38
+
+   Audio header:
+   00 01          ; Stream ID
+   02             ; Channels = 2
+   18             ; Bit Depth = 24
+   00 00 BB 80    ; Sample Rate = 48000
+   00 06          ; Samples per Channel = 6
+   00 00          ; Reserved
+   00 00 00 00 59 68 2F 00  ; PTS (1500000000)
+
+   Audio data (2 * 6 * 3 = 36 octets, all zero):
+   00 00 00 00 00 00 00 00 00 00 00 00
+   00 00 00 00 00 00 00 00 00 00 00 00
+   00 00 00 00 00 00 00 00 00 00 00 00
+
+D.5.  Tunnel Packet (GPIO)
+
+   GPIO state 0xC003 to node UID=0x00005678:
+
+   Common header:
+   01 20 00 00 00 00 12 34 00 0A 00 08
+
+   Tunnel payload:
+   00 00 56 78    ; Target UID
+   02             ; Tunnel Type = GPIO
+   0A             ; Tunnel Seq = 10
+   00 02          ; Tunnel Len = 2
+   C0 03          ; Pin States
+
+D.6.  Tunnel Packet (MIDI - Note On)
+
+   MIDI Note On, channel 0, note 60 (C4),
+   velocity 100, to node UID=0x00005678:
+
+   Common header:
+   01 20 00 00 00 00 12 34 00 0B 00 09
+
+   Tunnel payload:
+   00 00 56 78    ; Target UID
+   03             ; Tunnel Type = MIDI
+   05             ; Tunnel Seq = 5
+   00 03          ; Tunnel Len = 3
+   90             ; Note On, channel 0
+   3C             ; Note 60 (C4)
+   64             ; Velocity 100
+
+D.7.  Ping Packet
+
+   Ping from UID=0x1234 to UID=0x5678,
+   timestamp=2,000,000,000 ns, seq=42:
+
+   Common header:
+   01 40 00 00 00 00 12 34 00 00 00 10
+
+   Ping payload:
+   00 00 56 78                ; Target UID
+   00 00 00 00 77 35 94 00   ; Sender TS (2e9)
+   00 00 00 2A                ; Ping Seq = 42
+
+D.8.  Pong Packet
+
+   Pong responding to the above Ping:
+
+   Common header:
+   01 41 00 00 00 00 56 78 00 00 00 18
+
+   Pong payload:
+   00 00 12 34                ; Pinger UID
+   00 00 00 00 77 35 94 00   ; Echoed TS
+   00 00 00 2A                ; Echoed Seq
+   00 00 00 00 77 35 95 00   ; Responder TS
+                               ; (2000000256 ns)
+
+D.9.  LVDS TDM Frame (48 kHz, 2ch down, 2ch up)
+
+   Frame excerpt (first 32 bytes of 1024):
+
+   Byte  Hex   Description
+   ----  ----  -----------
+   0000  BC    K28.5 (Comma)
+   0001  3C    K28.1 (SOF)
+   0002  00 01 Frame Counter = 1
+   0004  00    Frame Type = Normal
+   0005  04    Flags: 48k, 24-bit, sideband
+   0006  03    Node Count = 3
+   0007  04    DN Audio Slots = 4
+   0008  02    UP Audio Slots = 2
+   0009  A7    SlotMap CRC
+   000A  00    DN Sideband = 0x00
+   000B  00 00 00  DN Ch0 sample (silence, 24b)
+   000E  00 00 00  DN Ch1 sample
+   0011  00 00 00  DN Ch2 sample
+   0014  00 00 00  DN Ch3 sample
+   0017  00 00 00  DN MIDI tunnel (3 bytes)
+   001A  BC    K28.5 (Guard)
+   001B  FB    K27.7 (Turnaround)
+   001C  00    UP Sideband = 0x00
+   001D  00 00 00  UP Ch0 sample
+   0020  00 00 00  UP Ch1 sample
+   ...
+   03FC  xx xx xx xx  CRC-32
+
+
+Appendix E.  Implementation Notes
+
+E.1.  Buffer Sizing Guidance
+
+   The following buffer sizes are recommended for
+   an ESP32-P4 implementation:
+
+   Audio ring buffer depth:
+
+      Minimum: 4 sample frames.
+      Recommended: 8 sample frames (default).
+      Maximum: 64 sample frames.
+
+      Memory per ring buffer:
+        mem = depth * channels * 4 bytes
+        Example: 8 frames * 64 ch * 4 B = 2048 B
+
+   DMA frame buffer:
+
+      Two frame buffers (double-buffering):
+        mem = 2 * frame_bytes
+        Example: 2 * 1024 = 2048 B
+
+   Tunnel queue:
+
+      8 entries * 256 bytes = 2048 B
+
+   Total SRAM budget for AudioBus core:
+
+      Audio ring (TX + RX):  4096 B
+      DMA frame buffers:     2048 B
+      Scratch buffers:       4096 B
+      Tunnel queues:         2048 B
+      Handle + state:         512 B
+      ----------------------------
+      Total:               ~12800 B (~12.5 KB)
+
+   This fits comfortably in the ESP32-P4's 512 KB
+   internal SRAM.
+
+E.2.  CPU Budget
+
+   At 48 kHz, the frame processing ISR and task
+   execute once per sample period (20.83 us).
+
+   Estimated CPU cycles per frame on ESP32-P4
+   at 400 MHz:
+
+   +--------------------------+--------+---------+
+   | Operation                | Cycles | Time    |
+   +--------------------------+--------+---------+
+   | 8b10b decode (1024 sym)  |  ~3000 |  7.5 us |
+   | CRC-32 verify (1024 B)   |  ~2000 |  5.0 us |
+   | Frame unpack (64 ch)     |  ~1500 |  3.8 us |
+   | Tunnel unpack            |   ~200 |  0.5 us |
+   | Frame pack (64 ch)       |  ~1500 |  3.8 us |
+   | Tunnel pack              |   ~200 |  0.5 us |
+   | 8b10b encode (1024 sym)  |  ~3000 |  7.5 us |
+   | CRC-32 compute           |  ~2000 |  5.0 us |
+   | Ring buffer R/W          |   ~500 |  1.3 us |
+   +--------------------------+--------+---------+
+   | Total (slave, full path) | ~13900 | 34.8 us |
+   +--------------------------+--------+---------+
+
+            Table E-1: CPU Budget per Frame
+
+   At 48 kHz (20.83 us period), the slave must
+   complete its processing within one frame period.
+   The budget above (34.8 us) exceeds 20.83 us.
+
+   Optimization strategies:
+
+   1.  Use DMA for 8b10b encode/decode, offloading
+       to the PARLIO peripheral (saves ~15 us).
+
+   2.  Use the second RISC-V core for CRC
+       computation (saves ~10 us on core 0).
+
+   3.  Use lookup tables for 8b10b (already
+       implemented in codec_8b10b.c).
+
+   4.  Process only the slots assigned to this
+       node, not the entire frame.
+
+   With DMA and dual-core, the effective per-frame
+   budget drops to approximately 8-10 us, well
+   within the 20.83 us frame period.
+
+E.3.  Suggested Task Priorities
+
+   FreeRTOS task priorities for an AudioBus node
+   (higher number = higher priority):
+
+   +---------------------------+-----------+------+
+   | Task                      | Priority  | Core |
+   +---------------------------+-----------+------+
+   | Frame processing ISR      | (ISR)     | 1    |
+   | Frame processing task     | MAX - 2   | 1    |
+   | PTP servo task            | MAX - 4   | 0    |
+   | Discovery/config task     | MAX - 6   | 0    |
+   | Application audio task    | MAX - 8   | 0    |
+   | Tunnel processing task    | MAX - 10  | 0    |
+   | Beacon/metadata task      | 10        | 0    |
+   | WiFi/network stack        | 5         | 0    |
+   | Idle                      | 0         | both |
+   +---------------------------+-----------+------+
+
+            Table E-2: Task Priorities
+
+   Core pinning:
+
+      The frame processing task MUST be pinned to
+      core 1 to avoid interference from WiFi and
+      other interrupts on core 0.
+
+      The PTP servo and application tasks run on
+      core 0.
+
+E.4.  Clock Accuracy Requirements
+
+   For sample-accurate synchronization across
+   nodes, the clock accuracy requirements are:
+
+   +---------------------+------------------------+
+   | Requirement         | Value                  |
+   +---------------------+------------------------+
+   | PTP sync accuracy   | < 1 us                 |
+   | Sample clock jitter | < 1 ns RMS             |
+   | Frequency accuracy  | < 1 ppm (locked)       |
+   | Holdover drift      | < 50 ppm (free-run)    |
+   | PLL lock time       | < 100 ms               |
+   +---------------------+------------------------+
+
+            Table E-3: Clock Requirements
+
+   The DS92LV1212A CDR provides sub-nanosecond
+   jitter on the recovered clock, meeting the
+   sample clock jitter requirement for LVDS mode.
+
+   For Ethernet mode, the PTP servo SHOULD use a
+   PI (proportional-integral) controller with:
+
+      Kp = 0.1 (proportional gain)
+      Ki = 0.001 (integral gain)
+      Update rate = 8 Hz (every Sync interval)
+
+   These values provide a settling time of
+   approximately 2 seconds and steady-state
+   accuracy better than 100 ns.
+
+E.5.  Power-Over-Bus Considerations
+
+   For installations where slave nodes are powered
+   over the same cable:
+
+   -  Use a second twisted pair for DC power.
+   -  Recommended voltage: 24 VDC (allows ~20 m
+      cable with 1 A load on 24 AWG).
+   -  Each slave uses a local DC-DC converter
+      (e.g., 24V to 3.3V).
+   -  Maximum current per pair: 1.5 A (Cat5e
+      rated).
+   -  Signal and power pairs MUST be separate
+      to avoid crosstalk.
+
+   If using Cat5 cable:
+
+      Pair 1 (pins 1,2): LVDS data
+      Pair 2 (pins 3,6): Not used
+      Pair 3 (pins 4,5): +24V power
+      Pair 4 (pins 7,8): Power return (GND)
 
 
 Acknowledgements
@@ -1851,6 +7567,14 @@ Acknowledgements
    embedded systems communities for their ongoing
    contributions to accessible audio networking
    technology.
+
+   Special thanks to the ESP-IDF development team
+   at Espressif Systems for the PARLIO peripheral
+   driver and hardware timestamping support.
+
+   The 8b10b encoding tables are derived from the
+   original work by A. X. Widmer and P. A.
+   Franaszek (IBM, 1983).
 
 
 Authors' Addresses
