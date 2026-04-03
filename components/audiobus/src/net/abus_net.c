@@ -123,10 +123,20 @@ struct abus_net_handle {
     abus_net_stream_t   remote_streams[ABUS_NET_MAX_NODES * 4];
     uint8_t             num_remote_streams;
 
-    /* Tunnel callback */
+    /* Tunnel callback (raw) */
     void (*tunnel_cb)(uint32_t sender_uid, abus_tunnel_type_t type,
                       const uint8_t *data, uint16_t len, void *ctx);
     void *tunnel_cb_ctx;
+
+    /* MIDI callback (structured) */
+    void (*midi_cb)(uint32_t sender_uid, const uint8_t *data, uint8_t len, void *ctx);
+    void *midi_cb_ctx;
+
+    /* GPIO state cache: per-node outgoing and incoming pin states */
+    uint16_t gpio_out[ABUS_NET_MAX_NODES];   /* What we send to each node */
+    uint16_t gpio_in[ABUS_NET_MAX_NODES];    /* What we received from each node */
+    uint32_t gpio_uid_map[ABUS_NET_MAX_NODES]; /* UID → index mapping */
+    uint8_t  gpio_node_count;
 
     /* Packet sequence counter */
     uint16_t            pkt_seq;
@@ -513,12 +523,30 @@ static void rx_task(void *arg) {
                 break;
 
             case ABUS_NET_PKT_TUNNEL:
-                if (h->tunnel_cb && payload_len >= sizeof(abus_net_tunnel_payload_t)) {
+                if (payload_len >= sizeof(abus_net_tunnel_payload_t)) {
                     const abus_net_tunnel_payload_t *tp = (const abus_net_tunnel_payload_t *)payload;
-                    if (tp->target_uid == 0 || tp->target_uid == h->uid) {
+                    if (tp->target_uid != 0 && tp->target_uid != h->uid) break;
+
+                    const uint8_t *tdata = payload + sizeof(abus_net_tunnel_payload_t);
+                    uint8_t tlen = tp->tunnel_len;
+
+                    /* Update GPIO state cache for incoming GPIO data */
+                    if (tp->tunnel_type == ABUS_TUNNEL_GPIO && tlen >= 2) {
+                        int idx = gpio_idx_for_uid(h, hdr->source_uid);
+                        if (idx >= 0) {
+                            h->gpio_in[idx] = (tdata[0] << 8) | tdata[1];
+                        }
+                    }
+
+                    /* Dispatch to MIDI callback if registered */
+                    if (tp->tunnel_type == ABUS_TUNNEL_MIDI && h->midi_cb && tlen > 0) {
+                        h->midi_cb(hdr->source_uid, tdata, tlen, h->midi_cb_ctx);
+                    }
+
+                    /* Dispatch to raw tunnel callback */
+                    if (h->tunnel_cb) {
                         h->tunnel_cb(hdr->source_uid, tp->tunnel_type,
-                                    payload + sizeof(abus_net_tunnel_payload_t),
-                                    tp->tunnel_len, h->tunnel_cb_ctx);
+                                    tdata, tlen, h->tunnel_cb_ctx);
                     }
                 }
                 break;
@@ -949,6 +977,99 @@ esp_err_t abus_net_tunnel_register(abus_net_handle_t h,
     h->tunnel_cb = cb;
     h->tunnel_cb_ctx = ctx;
     return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Public API: Tunnel convenience — GPIO, MIDI, SPI, I2C
+ * --------------------------------------------------------------------------- */
+
+/* Helper: find or allocate GPIO index for a node UID */
+static int gpio_idx_for_uid(struct abus_net_handle *h, uint32_t uid) {
+    for (int i = 0; i < h->gpio_node_count; i++) {
+        if (h->gpio_uid_map[i] == uid) return i;
+    }
+    if (h->gpio_node_count < ABUS_NET_MAX_NODES) {
+        int idx = h->gpio_node_count++;
+        h->gpio_uid_map[idx] = uid;
+        h->gpio_out[idx] = 0;
+        h->gpio_in[idx] = 0;
+        return idx;
+    }
+    return -1;
+}
+
+esp_err_t abus_net_gpio_set(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t pin, bool level) {
+    if (!h || pin >= 16) return ESP_ERR_INVALID_ARG;
+
+    int idx = gpio_idx_for_uid(h, target_uid);
+    if (idx < 0) return ESP_ERR_NO_MEM;
+
+    if (level) {
+        h->gpio_out[idx] |= (1 << pin);
+    } else {
+        h->gpio_out[idx] &= ~(1 << pin);
+    }
+
+    uint8_t data[2] = {
+        (h->gpio_out[idx] >> 8) & 0xFF,
+        h->gpio_out[idx] & 0xFF,
+    };
+    return abus_net_tunnel_send(h, target_uid, ABUS_TUNNEL_GPIO, data, 2);
+}
+
+bool abus_net_gpio_get(abus_net_handle_t h, uint32_t node_uid, uint8_t pin) {
+    if (!h || pin >= 16) return false;
+    int idx = gpio_idx_for_uid(h, node_uid);
+    if (idx < 0) return false;
+    return (h->gpio_in[idx] >> pin) & 1;
+}
+
+esp_err_t abus_net_midi_send(abus_net_handle_t h, uint32_t target_uid,
+                              const uint8_t *data, uint8_t len) {
+    if (!h || !data || len == 0 || len > 3) return ESP_ERR_INVALID_ARG;
+    return abus_net_tunnel_send(h, target_uid, ABUS_TUNNEL_MIDI, data, len);
+}
+
+esp_err_t abus_net_midi_register(abus_net_handle_t h,
+                                  void (*cb)(uint32_t, const uint8_t *, uint8_t, void *),
+                                  void *ctx) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    h->midi_cb = cb;
+    h->midi_cb_ctx = ctx;
+    return ESP_OK;
+}
+
+esp_err_t abus_net_spi_xfer(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t cs_pin, uint8_t mode,
+                             const uint8_t *tx_data, uint16_t len) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    /* Pack: [CS:1][MODE:1][DATA...] */
+    uint16_t pkt_len = 2 + len;
+    uint8_t *buf = heap_caps_malloc(pkt_len, MALLOC_CAP_INTERNAL);
+    if (!buf) return ESP_ERR_NO_MEM;
+    buf[0] = cs_pin;
+    buf[1] = mode;
+    if (tx_data && len > 0) memcpy(buf + 2, tx_data, len);
+    esp_err_t ret = abus_net_tunnel_send(h, target_uid, ABUS_TUNNEL_SPI, buf, pkt_len);
+    heap_caps_free(buf);
+    return ret;
+}
+
+esp_err_t abus_net_i2c_xfer(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t addr, bool is_read,
+                             const uint8_t *tx_data, uint16_t tx_len) {
+    if (!h) return ESP_ERR_INVALID_ARG;
+    /* Pack: [ADDR:1][FLAGS:1][DATA...] */
+    uint16_t pkt_len = 2 + tx_len;
+    uint8_t *buf = heap_caps_malloc(pkt_len, MALLOC_CAP_INTERNAL);
+    if (!buf) return ESP_ERR_NO_MEM;
+    buf[0] = addr;
+    buf[1] = is_read ? 0x01 : 0x00;
+    if (tx_data && tx_len > 0) memcpy(buf + 2, tx_data, tx_len);
+    esp_err_t ret = abus_net_tunnel_send(h, target_uid, ABUS_TUNNEL_I2C, buf, pkt_len);
+    heap_caps_free(buf);
+    return ret;
 }
 
 /* ---------------------------------------------------------------------------

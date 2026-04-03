@@ -406,6 +406,69 @@ esp_err_t abus_net_tunnel_register(abus_net_handle_t h,
                                     void *ctx);
 
 /* ---------------------------------------------------------------------------
+ * Tunnel convenience API — GPIO, MIDI, SPI, I2C over Ethernet
+ *
+ * These wrap abus_net_tunnel_send() with structured payloads matching the
+ * bus-mode tunnel format, so both transports are interchangeable at the app level.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * Set a GPIO pin on a remote node.
+ * State is cached locally and sent as a 16-bit bitmask per node.
+ * @param target_uid   Remote node UID
+ * @param pin          GPIO pin number (0-15)
+ * @param level        true=HIGH, false=LOW
+ */
+esp_err_t abus_net_gpio_set(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t pin, bool level);
+
+/** Read last-known GPIO state of a remote node (from received tunnel data). */
+bool abus_net_gpio_get(abus_net_handle_t h, uint32_t node_uid, uint8_t pin);
+
+/**
+ * Send MIDI message to a specific node (or broadcast with uid=0).
+ * @param data   Raw MIDI bytes (1-3 bytes: status [+ data1 [+ data2]])
+ * @param len    1, 2, or 3
+ */
+esp_err_t abus_net_midi_send(abus_net_handle_t h, uint32_t target_uid,
+                              const uint8_t *data, uint8_t len);
+
+/** Register MIDI receive callback (separate from raw tunnel callback). */
+esp_err_t abus_net_midi_register(abus_net_handle_t h,
+                                  void (*cb)(uint32_t sender_uid,
+                                            const uint8_t *data, uint8_t len,
+                                            void *ctx),
+                                  void *ctx);
+
+/**
+ * Execute an SPI transaction on a remote node.
+ * The transaction is serialized into a tunnel packet.
+ * Response (if any) arrives via the tunnel callback.
+ *
+ * @param target_uid   Remote node
+ * @param cs_pin       Which CS to assert on the remote node
+ * @param mode         SPI mode 0-3
+ * @param tx_data      Data to send
+ * @param len          Transaction length
+ */
+esp_err_t abus_net_spi_xfer(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t cs_pin, uint8_t mode,
+                             const uint8_t *tx_data, uint16_t len);
+
+/**
+ * Execute an I2C transaction on a remote node.
+ *
+ * @param target_uid   Remote node
+ * @param addr         7-bit I2C address
+ * @param is_read      true=read, false=write
+ * @param tx_data      Data to write (or register address for read)
+ * @param tx_len       Write data length
+ */
+esp_err_t abus_net_i2c_xfer(abus_net_handle_t h, uint32_t target_uid,
+                             uint8_t addr, bool is_read,
+                             const uint8_t *tx_data, uint16_t tx_len);
+
+/* ---------------------------------------------------------------------------
  * Metadata API
  * --------------------------------------------------------------------------- */
 
