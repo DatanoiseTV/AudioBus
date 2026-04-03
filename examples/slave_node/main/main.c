@@ -13,10 +13,10 @@
  *
  * Hardware required:
  *   - ESP32-P4 DevKit (or ESP32-S3 for simpler end-nodes)
- *   - DS92LV1021A + DS92LV1212A (upstream port only for end-node)
+ *   - SN65LVDT41 LVDS transceiver (~$2)
+ *   - Si5351A clock generator (~$1.50, generates 98.304 MHz local clock)
  *   - I2S DAC (e.g., PCM5102A) for audio output
  *   - I2S ADC (e.g., PCM1808) for audio input (optional)
- *   - No external clock oscillator needed — slave recovers clock from bus!
  */
 
 #include <stdio.h>
@@ -28,36 +28,23 @@
 static const char *TAG = "slave_example";
 
 /*
- * GPIO pin assignments — adjust for your PCB.
- * Slave needs only the upstream port (toward master).
- * The recovered clock from DS92LV1212A RCLK is used for both
- * PARLIO TX and the local I2S DAC/ADC MCLK.
+ * GPIO pin assignments — only 7 pins for bus + Si5351A!
+ *
+ *   GPIO 6  ←── Si5351A CLK0 output (98.304 MHz, generated from 25 MHz xtal)
+ *   GPIO 7  ──→ SN65LVDT41 D  (TX data)
+ *   GPIO 8  ←── SN65LVDT41 R  (RX data)
+ *   GPIO 9  ──→ SN65LVDT41 DE (direction control)
+ *   GPIO 10     PARLIO clock
+ *   GPIO 3  ──→ Si5351A SDA (I2C for clock adjustment — software PLL)
+ *   GPIO 4  ──→ Si5351A SCL
  */
-#define PIN_TX_D0           7
-#define PIN_TX_D1           8
-#define PIN_TX_D2           9
-#define PIN_TX_D3           10
-#define PIN_TX_D4           11
-#define PIN_TX_D5           12
-#define PIN_TX_D6           13
-#define PIN_TX_D7           14
-#define PIN_TX_D8           15
-#define PIN_TX_D9           16
-#define PIN_TX_CLK          17
-#define PIN_TX_OE           18
-
-#define PIN_RX_D0           19
-#define PIN_RX_D1           20
-#define PIN_RX_D2           21
-#define PIN_RX_D3           22
-#define PIN_RX_D4           23
-#define PIN_RX_D5           24
-#define PIN_RX_D6           25
-#define PIN_RX_D7           26
-#define PIN_RX_D8           27
-#define PIN_RX_D9           28
-#define PIN_RX_CLK          29      /* DS92LV1212A RCLK (self-clocking!) */
-#define PIN_RX_LOCK         30      /* DS92LV1212A LOCK */
+#define PIN_EXT_CLK         6       /* Si5351A CLK0 → PARLIO ext clock */
+#define PIN_TX_DATA         7       /* → SN65LVDT41 D */
+#define PIN_RX_DATA         8       /* ← SN65LVDT41 R */
+#define PIN_DE              9       /* → SN65LVDT41 DE */
+#define PIN_PARLIO_CLK      10
+#define PIN_I2C_SDA         3       /* Si5351A I2C */
+#define PIN_I2C_SCL         4
 
 /* I2S pins for local audio codec */
 #define PIN_I2S_BCK         31
@@ -149,7 +136,7 @@ void app_main(void) {
 
     abus_config_t config = {
         .role = ABUS_ROLE_SLAVE,
-        .phy_type = ABUS_PHY_LVDS_SERDES,
+        .phy_type = ABUS_PHY_LVDS_SINGLE,  /* Single-chip transceiver */
         .sample_rate = ABUS_SR_48000,
         .bit_depth = ABUS_DEPTH_32,
         .audio_buffer_frames = 8,
@@ -167,21 +154,17 @@ void app_main(void) {
             .uid = 0xDEAD0001,          /* Unique hardware ID */
         },
 
-        .pins.lvds_pins = {
-            .upstream_tx_data = {
-                PIN_TX_D0, PIN_TX_D1, PIN_TX_D2, PIN_TX_D3, PIN_TX_D4,
-                PIN_TX_D5, PIN_TX_D6, PIN_TX_D7, PIN_TX_D8, PIN_TX_D9,
-            },
-            .upstream_tx_clk  = PIN_TX_CLK,
-            .upstream_tx_oe   = PIN_TX_OE,
-            .upstream_rx_data = {
-                PIN_RX_D0, PIN_RX_D1, PIN_RX_D2, PIN_RX_D3, PIN_RX_D4,
-                PIN_RX_D5, PIN_RX_D6, PIN_RX_D7, PIN_RX_D8, PIN_RX_D9,
-            },
-            .upstream_rx_clk  = PIN_RX_CLK,
-            .upstream_rx_lock = PIN_RX_LOCK,
-            /* End-node: no downstream port */
-            .downstream_tx_clk = -1,
+        /* Only 7 pins total (5 bus + 2 I2C for Si5351A) */
+        .pins.oneic_pins = {
+            .upstream_data   = PIN_TX_DATA,
+            .upstream_clk    = PIN_PARLIO_CLK,
+            .upstream_de     = PIN_DE,
+            .downstream_data = -1,      /* End-node: no downstream */
+            .downstream_clk  = -1,
+            .downstream_de   = -1,
+            .clk_in          = PIN_EXT_CLK,
+            .i2c_sda         = PIN_I2C_SDA,   /* Si5351A for clock generation */
+            .i2c_scl         = PIN_I2C_SCL,
         },
     };
 

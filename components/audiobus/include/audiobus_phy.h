@@ -97,10 +97,25 @@ typedef struct {
 } abus_phy_t;
 
 /**
- * Create LVDS SerDes PHY instance.
- * @param pin_config  Pointer to the lvds_pins section of abus_pin_config_t
- * @param sr          Sample rate (determines PARLIO clock: 49.152 or 45.158 MHz)
- * @param role        Master generates clock from crystal; slave uses recovered clock
+ * Create single-chip LVDS transceiver PHY (SN65LVDT41). RECOMMENDED.
+ * 1-bit PARLIO at 98.304 MHz. 5 GPIO pins per port. ~$2/port.
+ * Up to 25 channels/direction at 48 kHz/32-bit.
+ *
+ * @param pin_config  Pointer to oneic_pins section of abus_pin_config_t
+ * @param sr          Sample rate
+ * @param role        Master uses crystal osc; slave uses Si5351A + software PLL
+ */
+esp_err_t abus_phy_oneic_create(const void *pin_config, abus_sample_rate_t sr,
+                                abus_role_t role, abus_phy_t *out_phy);
+
+/**
+ * Create 10:1 LVDS SerDes PHY (DS92LV1021A + DS92LV1212A). Maximum performance.
+ * 16-bit PARLIO at 49.152 MHz. 24 GPIO pins per port. ~$7/port.
+ * Up to 64 channels/direction at 48 kHz/32-bit. Hardware CDR self-clocking.
+ *
+ * @param pin_config  Pointer to serdes_pins section of abus_pin_config_t
+ * @param sr          Sample rate
+ * @param role        Master generates clock from crystal; slave uses CDR recovered clock
  */
 esp_err_t abus_phy_lvds_create(const void *pin_config, abus_sample_rate_t sr,
                                abus_role_t role, abus_phy_t *out_phy);

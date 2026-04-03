@@ -1,18 +1,15 @@
 /*
  * AudioBus Master Node Example — ESP32-P4
  *
- * Demonstrates a master node that:
- *   - Initializes the LVDS SerDes PHY on PARLIO
- *   - Discovers slave nodes on the daisy chain
- *   - Streams 2 channels of downstream audio (sine wave test tone)
- *   - Receives upstream audio from slaves
- *   - Tunnels MIDI data to slave nodes
+ * Demonstrates a master node using the SN65LVDT41 single-chip LVDS transceiver.
+ * Only 5 GPIO pins for the audio bus — EMAC stays free for Ethernet.
  *
  * Hardware required:
  *   - ESP32-P4 DevKit
- *   - 49.152 MHz crystal oscillator module (audio master clock)
- *   - DS92LV1021A serializer + DS92LV1212A deserializer
- *   - LVDS twisted pair to first slave node
+ *   - SN65LVDT41 LVDS transceiver (~$2)
+ *   - 98.304 MHz crystal oscillator (2× audio clock, or Si5351A)
+ *   - 100Ω twisted pair cable to first slave node
+ *   - 100Ω termination resistor across the differential pair
  *   - See docs/HARDWARE.md for full schematic
  */
 
@@ -25,35 +22,23 @@
 
 static const char *TAG = "master_example";
 
-/* GPIO pin assignments — adjust for your PCB */
-#define PIN_MCLK_IN         6       /* 49.152 MHz oscillator → PARLIO ext clock */
-
-/* Upstream port (to first slave node) */
-#define PIN_TX_D0           7
-#define PIN_TX_D1           8
-#define PIN_TX_D2           9
-#define PIN_TX_D3           10
-#define PIN_TX_D4           11
-#define PIN_TX_D5           12
-#define PIN_TX_D6           13
-#define PIN_TX_D7           14
-#define PIN_TX_D8           15
-#define PIN_TX_D9           16
-#define PIN_TX_CLK          17      /* PARLIO clk_out → DS92LV1021A TCLK */
-#define PIN_TX_OE           18      /* → DS92LV1021A PDB (output enable) */
-
-#define PIN_RX_D0           19
-#define PIN_RX_D1           20
-#define PIN_RX_D2           21
-#define PIN_RX_D3           22
-#define PIN_RX_D4           23
-#define PIN_RX_D5           24
-#define PIN_RX_D6           25
-#define PIN_RX_D7           26
-#define PIN_RX_D8           27
-#define PIN_RX_D9           28
-#define PIN_RX_CLK          29      /* DS92LV1212A RCLK → PARLIO ext clock */
-#define PIN_RX_LOCK         30      /* DS92LV1212A LOCK (CDR lock status) */
+/*
+ * GPIO pin assignments — only 5 pins for the audio bus!
+ *
+ *   ESP32-P4 GPIO 6  ←── 98.304 MHz oscillator (external clock input)
+ *   ESP32-P4 GPIO 7  ──→ SN65LVDT41 D input  (TX data, PARLIO 1-bit out)
+ *   ESP32-P4 GPIO 8  ←── SN65LVDT41 R output  (RX data, PARLIO 1-bit in)
+ *   ESP32-P4 GPIO 9  ──→ SN65LVDT41 DE        (direction: HIGH=TX, LOW=RX)
+ *   ESP32-P4 GPIO 10     (PARLIO clock output, optional routing)
+ *
+ *   SN65LVDT41 Y/Z ──── twisted pair ──── remote SN65LVDT41 A/B
+ *   100Ω termination across Y/Z and across A/B
+ */
+#define PIN_EXT_CLK         6       /* 98.304 MHz oscillator */
+#define PIN_TX_DATA         7       /* → SN65LVDT41 D (driver input) */
+#define PIN_RX_DATA         8       /* ← SN65LVDT41 R (receiver output) */
+#define PIN_DE              9       /* → SN65LVDT41 DE (driver enable) */
+#define PIN_PARLIO_CLK      10      /* PARLIO clock (optional) */
 
 /* Event callback */
 static void bus_event_handler(const abus_event_t *event, void *ctx) {
@@ -65,113 +50,68 @@ static void bus_event_handler(const abus_event_t *event, void *ctx) {
                      event->discovered_node.max_dn_channels,
                      event->discovered_node.max_up_channels);
             break;
-
         case ABUS_EVT_NODE_LOST:
             ESP_LOGW(TAG, "Node %d lost!", event->node_id);
             break;
-
         case ABUS_EVT_LINK_UP:
-            ESP_LOGI(TAG, "Link up on port %d", event->node_id);
+            ESP_LOGI(TAG, "Link up");
             break;
-
         case ABUS_EVT_LINK_DOWN:
-            ESP_LOGW(TAG, "Link down on port %d", event->node_id);
+            ESP_LOGW(TAG, "Link down");
             break;
-
-        case ABUS_EVT_CONFIG_COMPLETE:
-            ESP_LOGI(TAG, "Bus configured, entering run mode");
-            break;
-
-        case ABUS_EVT_FRAME_ERROR:
-            ESP_LOGD(TAG, "Frame error: 0x%08lx", (unsigned long)event->error_code);
-            break;
-
         default:
             break;
     }
 }
 
-/* Generate a stereo sine wave test tone */
+/* Generate stereo sine wave test tone */
 static void audio_generator_task(void *arg) {
     abus_handle_t bus = (abus_handle_t)arg;
-    const float freq = 440.0f;
-    const float sr = 48000.0f;
-    const float amplitude = 0.5f;
     float phase = 0.0f;
-    const float phase_inc = 2.0f * M_PI * freq / sr;
-
-    int32_t samples[2];  /* Stereo: L + R */
+    const float phase_inc = 2.0f * M_PI * 440.0f / 48000.0f;
+    int32_t samples[2];
 
     while (1) {
-        /* Wait until bus is running */
         if (abus_get_state(bus) != ABUS_STATE_RUNNING) {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
-        /* Generate one sample frame */
-        float val = amplitude * sinf(phase);
-        samples[0] = (int32_t)(val * 2147483647.0f);  /* Left: sine */
-        samples[1] = samples[0];                        /* Right: same */
-
+        float val = 0.5f * sinf(phase);
+        samples[0] = (int32_t)(val * 2147483647.0f);
+        samples[1] = samples[0];
         phase += phase_inc;
         if (phase >= 2.0f * M_PI) phase -= 2.0f * M_PI;
 
-        /* Write to bus (blocks briefly if buffer full) */
         while (abus_audio_write(bus, samples, 1) == 0) {
             vTaskDelay(1);
         }
     }
 }
 
-/* Read upstream audio from slaves */
-static void audio_receiver_task(void *arg) {
-    abus_handle_t bus = (abus_handle_t)arg;
-    int32_t samples[64];  /* Up to 64 channels */
-
-    while (1) {
-        if (abus_get_state(bus) != ABUS_STATE_RUNNING) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-
-        int n = abus_audio_read(bus, samples, 1);
-        if (n > 0) {
-            /* Process upstream audio here — e.g., record, mix, forward to USB/I2S */
-            (void)samples;
-        } else {
-            vTaskDelay(1);
-        }
-    }
-}
-
 void app_main(void) {
-    ESP_LOGI(TAG, "AudioBus Master Node — starting");
+    ESP_LOGI(TAG, "AudioBus Master Node — SN65LVDT41 single-chip PHY");
 
     abus_config_t config = {
         .role = ABUS_ROLE_MASTER,
-        .phy_type = ABUS_PHY_LVDS_SERDES,
+        .phy_type = ABUS_PHY_LVDS_SINGLE,  /* Single-chip transceiver */
         .sample_rate = ABUS_SR_48000,
         .bit_depth = ABUS_DEPTH_32,
-        .expected_nodes = 0,        /* Auto-discover */
+        .expected_nodes = 0,
         .audio_buffer_frames = 8,
         .event_cb = bus_event_handler,
-        .event_cb_ctx = NULL,
-        .pins.lvds_pins = {
-            .upstream_tx_data = {
-                PIN_TX_D0, PIN_TX_D1, PIN_TX_D2, PIN_TX_D3, PIN_TX_D4,
-                PIN_TX_D5, PIN_TX_D6, PIN_TX_D7, PIN_TX_D8, PIN_TX_D9,
-            },
-            .upstream_tx_clk  = PIN_TX_CLK,
-            .upstream_tx_oe   = PIN_TX_OE,
-            .upstream_rx_data = {
-                PIN_RX_D0, PIN_RX_D1, PIN_RX_D2, PIN_RX_D3, PIN_RX_D4,
-                PIN_RX_D5, PIN_RX_D6, PIN_RX_D7, PIN_RX_D8, PIN_RX_D9,
-            },
-            .upstream_rx_clk  = PIN_RX_CLK,
-            .upstream_rx_lock = PIN_RX_LOCK,
-            /* Master has no downstream port — single-port operation */
-            .downstream_tx_clk = -1,
+
+        /* Only 5 pins! Compare to 24 for the 2-chip SerDes approach. */
+        .pins.oneic_pins = {
+            .upstream_data   = PIN_TX_DATA,
+            .upstream_clk    = PIN_PARLIO_CLK,
+            .upstream_de     = PIN_DE,
+            .downstream_data = -1,      /* Master = single port */
+            .downstream_clk  = -1,
+            .downstream_de   = -1,
+            .clk_in          = PIN_EXT_CLK,
+            .i2c_sda         = -1,      /* Master doesn't need Si5351A */
+            .i2c_scl         = -1,
         },
     };
 
@@ -188,20 +128,15 @@ void app_main(void) {
         return;
     }
 
-    /* Start audio generator and receiver tasks */
     xTaskCreate(audio_generator_task, "audio_gen", 4096, bus, 10, NULL);
-    xTaskCreate(audio_receiver_task, "audio_rx", 4096, bus, 10, NULL);
 
-    /* Main loop: print stats periodically */
+    /* Status reporting */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
-
         abus_stats_t stats;
         abus_get_stats(bus, &stats);
-
-        ESP_LOGI(TAG, "Stats: tx=%lu rx=%lu crc_err=%lu sync_loss=%lu overrun=%lu underrun=%lu",
-                 stats.frames_tx, stats.frames_rx, stats.crc_errors,
-                 stats.sync_losses, stats.buffer_overruns, stats.buffer_underruns);
-        ESP_LOGI(TAG, "Nodes: %d, State: %d", abus_get_node_count(bus), abus_get_state(bus));
+        ESP_LOGI(TAG, "tx=%lu rx=%lu crc_err=%lu nodes=%d",
+                 stats.frames_tx, stats.frames_rx,
+                 stats.crc_errors, abus_get_node_count(bus));
     }
 }

@@ -27,25 +27,37 @@ extern "C" {
  * --------------------------------------------------------------------------- */
 
 typedef struct {
-    /* PHY pin assignments — LVDS SerDes (PARLIO interface to DS92LV1021A/1212A) */
+    /* PHY Option 1: SN65LVDT41 single-chip LVDS transceiver
+     * Only 5 GPIO pins per port — dramatically simpler wiring.
+     * PARLIO 1-bit mode at 98.304 MHz. */
     struct {
-        int8_t upstream_tx_data[10];    /* PARLIO TX data pins [0..9] → DS92LV1021A DIN */
-        int8_t upstream_tx_clk;         /* PARLIO TX clock → DS92LV1021A TCLK */
-        int8_t upstream_tx_oe;          /* GPIO → DS92LV1021A PDB (output enable) */
-        int8_t upstream_rx_data[10];    /* DS92LV1212A DOUT → PARLIO RX data [0..9] */
-        int8_t upstream_rx_clk;         /* DS92LV1212A RCLK → PARLIO RX clock */
-        int8_t upstream_rx_lock;        /* DS92LV1212A LOCK → GPIO (link detect) */
+        int8_t upstream_data;       /* PARLIO TX/RX data (1-bit) → SN65LVDT41 D / R */
+        int8_t upstream_clk;        /* PARLIO clock (98.304 MHz ext or generated) */
+        int8_t upstream_de;         /* GPIO → SN65LVDT41 DE (driver enable, HIGH=TX) */
+        int8_t downstream_data;     /* Same for downstream port (-1 = not used) */
+        int8_t downstream_clk;
+        int8_t downstream_de;
+        int8_t clk_in;             /* External clock input (master: oscillator, slave: Si5351A) */
+        int8_t i2c_sda;            /* Si5351A I2C (slave only, -1 if not used) */
+        int8_t i2c_scl;
+    } oneic_pins;
 
+    /* PHY Option 2: DS92LV1021A + DS92LV1212A (10:1 SerDes)
+     * 24 GPIO pins per port — maximum bandwidth (64ch). */
+    struct {
+        int8_t upstream_tx_data[10];    /* PARLIO TX data [0..9] → DS92LV1021A DIN */
+        int8_t upstream_tx_clk;         /* PARLIO TX clock → DS92LV1021A TCLK */
+        int8_t upstream_tx_oe;          /* GPIO → DS92LV1021A PDB */
+        int8_t upstream_rx_data[10];    /* DS92LV1212A DOUT → PARLIO RX data [0..9] */
+        int8_t upstream_rx_clk;         /* DS92LV1212A RCLK → PARLIO RX ext clock */
+        int8_t upstream_rx_lock;        /* DS92LV1212A LOCK → GPIO */
         int8_t downstream_tx_data[10];
         int8_t downstream_tx_clk;
         int8_t downstream_tx_oe;
         int8_t downstream_rx_data[10];
         int8_t downstream_rx_clk;
         int8_t downstream_rx_lock;
-    } lvds_pins;
-
-    /* Reserved for future PHY options */
-    uint8_t _reserved[16];
+    } serdes_pins;
 } abus_pin_config_t;
 
 typedef struct {

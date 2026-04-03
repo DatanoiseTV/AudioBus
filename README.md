@@ -10,34 +10,49 @@ Built on commodity components — no proprietary silicon required.
 ┌──────────┐  1 twisted  ┌──────────┐  1 twisted  ┌──────────┐  1 twisted  ┌──────────┐
 │  MASTER  │────pair────→│  SLAVE 1 │────pair────→│  SLAVE 2 │────pair────→│  SLAVE 3 │
 │ ESP32-P4 │←───────────│ speaker  │←───────────│ spk+mic  │←───────────│ analog   │
-│          │  491 Mbps   │  node    │  491 Mbps   │  node    │  491 Mbps   │  bridge  │
+│          │  98 Mbps    │  node    │  98 Mbps    │  node    │  98 Mbps    │  bridge  │
 │ EMAC free│  half-dpx   │ EMAC free│             │ EMAC free│             │ EMAC free│
 └──────────┘             └──────────┘             └──────────┘             └──────────┘
      ↕                                                                        (end)
-  Ethernet                     Each node: ~$14-18
-  or WiFi                      Single Cat5 pair per link
-  (independent)                Hot-plug: just plug in a new node
+  Ethernet              1 IC per port (SN65LVDT41, ~$2)
+  or WiFi               Only 5 GPIO pins for the bus!
+  (independent)         Single Cat5 pair per link
 ```
+
+## Two PHY Options
+
+| | SN65LVDT41 (Recommended) | DS92LV1021A + DS92LV1212A |
+|---|---|---|
+| **Chips per port** | **1** | 2 (serializer + deserializer) |
+| **Cost per port** | **~$2** | ~$7 |
+| **GPIO pins** | **5** | 24 |
+| **Line rate** | 98.3 Mbps | 491.5 Mbps |
+| **Channels/dir @ 48kHz** | **25** (32-bit) / **34** (24-bit) | **64** (32-bit) |
+| **Channels/dir @ 96kHz** | **12** (32-bit) | **62** (32-bit) |
+| **Clock recovery** | Software PLL (Si5351A) | Hardware CDR (in deserializer) |
+| **Best for** | Most nodes (2-16 ch) | High-density (32-64 ch) |
+
+The single-chip approach is recommended for most use cases. Speakers, microphones, small mixers, and analog bridges rarely need more than 8 channels per direction.
 
 ## Key Features
 
 | Feature | Specification |
 |---------|---------------|
-| Audio channels | Up to **64 per direction** (128 total) at 48 kHz/32-bit |
+| Audio channels | **25/dir** (1-chip) or **64/dir** (2-chip) at 48 kHz/32-bit |
 | Sample rates | 44.1, 48, 88.2, 96 kHz |
 | Bit depth | 16, 24, or 32 bit (configurable per bus) |
 | Wire | **Single twisted pair** per link (Cat5 pair, STP, etc.) |
 | Topology | **Daisy chain**, up to 16 nodes |
 | Duplex | Half-duplex with direction switching (~650 ns guard) |
-| Line rate | **491.52 Mbps** LVDS |
+| Line rate | 98.3 Mbps (1-chip) or 491.5 Mbps (2-chip) |
 | Encoding | 8b10b (DC-balanced, self-clocking, error detection) |
 | Latency | ~21 µs per hop (1 sample @ 48 kHz) |
 | Jitter | Deterministic — fixed slot map, no per-frame allocation |
-| Hot-plug | CDR lock detection on each port |
+| Hot-plug | Frame timeout / CDR lock detection |
 | Tunneling | SPI, I2C, GPIO (16 pins/node), MIDI |
 | Sideband | 1 byte/frame/direction (MIDI clock, sync triggers) |
 | ESP32 EMAC | **Free** — use Ethernet/WiFi independently |
-| Cost per node | ~$14 (master), ~$18 (slave with codec) |
+| Cost per node | **~$8** (master, 1-chip) or ~$14 (master, 2-chip) |
 
 ## How It Works
 
@@ -92,38 +107,42 @@ Slot Map (computed once at config time):
 
 Every frame uses identical byte positions. Packing and unpacking is a simple `memcpy` per slot — no branching, no allocation, no jitter.
 
-### Physical Layer — Repurposing LVDS Video SerDes
+### Physical Layer — Single-Chip LVDS Transceiver (Recommended)
 
-The key hardware trick: we use **TI DS92LV1021A** (10:1 LVDS serializer) and **DS92LV1212A** (1:10 LVDS deserializer with CDR) — chips designed for high-speed video links — as our audio bus transceiver.
+The default PHY uses the **TI SN65LVDT41** — a single LVDS transceiver with both driver and receiver on one differential pair. Half-duplex via the DE pin. **Only 1 chip and 5 GPIO pins per port.**
 
 ```
-  ESP32-P4                    DS92LV1021A              Twisted Pair
+  ESP32-P4                    SN65LVDT41                Twisted Pair
  ┌─────────┐                ┌─────────────┐           ╔═══════════╗
- │ PARLIO  │  10-bit @      │ 10:1 LVDS   │  491 Mbps ║           ║
- │ TX unit │──49.152 MHz──→│ Serializer  │──LVDS───→║  Single   ║
- │         │  (16-bit bus,  │             │           ║  Twisted  ║
- │         │   bits 0-9)    │ PDB=OE ctrl │←──GPIO    ║  Pair     ║
- │         │                └─────────────┘           ║           ║
- │         │                                          ║  Cat5     ║
- │         │                DS92LV1212A               ║  or STP   ║
- │         │                ┌─────────────┐           ║           ║
- │ PARLIO  │  10-bit +      │ 1:10 LVDS   │  CDR      ║  up to    ║
- │ RX unit │←─recov. clk──│ Deserializer │←─LVDS────║  15-20m   ║
- │         │                │   with CDR   │           ║           ║
- │         │  LOCK status──│ PLL locked!  │→──GPIO    ╚═══════════╝
- └─────────┘                └─────────────┘
-                              ↑
-                          RCLK = recovered 49.152 MHz
-                          (self-clocking! no clock wire needed)
+ │         │                │             │           ║           ║
+ │ PARLIO  │  1-bit @       │  D ────→ Y+ ┼──────────║  Single   ║
+ │ TX out  │──98.304MHz───→│  (driver)    │           ║  Twisted  ║
+ │         │                │         Y- ─┼──────────║  Pair     ║
+ │ PARLIO  │  1-bit         │  R ←─── A ──┼──────────║           ║
+ │ RX in   │←──────────────│  (receiver)  │           ║  Cat5     ║
+ │         │                │         B ──┼──────────║  or STP   ║
+ │ GPIO ───┼──→ DE          │ HIGH=TX     │   100Ω   ║  up to    ║
+ │         │   LOW=RX       │ LOW=RX      │   term.  ║  ~20m     ║
+ └─────────┘                └─────────────┘           ╚═══════════╝
+
+  Total: 5 GPIO + 1 chip per port. That's it!
 ```
 
-**Why these chips?**
-- **Self-clocking**: DS92LV1212A CDR PLL recovers the clock from 8b10b data transitions. No separate clock wire needed on the twisted pair.
-- **High bandwidth**: 491 Mbps at 49.152 MHz parallel clock.
-- **Low jitter**: LVDS + CDR PLL provides audio-grade recovered clock.
-- **Simple interface**: 10-bit parallel maps directly to 8b10b symbol width. ESP32-P4 PARLIO at 16-bit width connects with bits [10:15] unused.
-- **Half-duplex**: Serializer has a PDB (power-down/output-enable) pin. Disable it → LVDS output goes high-Z → remote end can now drive the pair.
-- **Cheap**: ~$3.50 each, ~$7 per port.
+**Why this chip?**
+- **Single IC**: Driver + receiver in one package, no serializer/deserializer pair needed.
+- **Dirt cheap**: ~$2 per port (vs ~$7 for the 2-chip SerDes).
+- **Minimal pins**: Data TX, data RX, DE, clock out, ext clock in = **5 GPIO total**.
+- **Fast**: Rated 400 Mbps. We run 98.3 Mbps — well within spec.
+- **Half-duplex**: DE pin controls direction. The PARLIO serializes 8b10b-encoded data 1 bit at a time.
+
+### High-Performance Option — 10:1 LVDS SerDes (64 channels)
+
+For applications needing 32-64 channels per direction, the 2-chip option uses **DS92LV1021A** (serializer) + **DS92LV1212A** (deserializer with hardware CDR):
+- PARLIO 16-bit mode at 49.152 MHz → 491 Mbps line rate
+- 64 channels/direction at 48 kHz/32-bit
+- True hardware self-clocking via CDR PLL
+- 24 GPIO pins per port, ~$7/port
+- See [HARDWARE.md](docs/HARDWARE.md) for full wiring details.
 
 ### Self-Clocking via 8b10b + CDR
 
@@ -249,59 +268,41 @@ At 48 kHz with 32 channels of 32-bit audio, **246 bytes per frame** are availabl
 | **End-node slave** | ESP32-P4 + DS92LV1021A + DS92LV1212A + I2S codec | **~$18** |
 | **Intermediate** | Above + 2nd SerDes pair + bus MUX | **~$27** |
 
-### ESP32-P4 Wiring (Single-Port Node)
+### ESP32-P4 Wiring — Single-Chip PHY (SN65LVDT41)
 
 ```
                            ESP32-P4
-                        ┌──────────────┐
-  49.152 MHz XO    ────→│ GPIO 6  (CLK IN)         │
-  (master only,         │                          │
-   slave uses RCLK)     │                          │
-                        │          PARLIO TX        │
-  DS92LV1021A DIN0 ←───│ GPIO 7   (TX D0)         │
-  DS92LV1021A DIN1 ←───│ GPIO 8   (TX D1)         │
-  DS92LV1021A DIN2 ←───│ GPIO 9   (TX D2)         │
-  DS92LV1021A DIN3 ←───│ GPIO 10  (TX D3)         │
-  DS92LV1021A DIN4 ←───│ GPIO 11  (TX D4)         │
-  DS92LV1021A DIN5 ←───│ GPIO 12  (TX D5)         │
-  DS92LV1021A DIN6 ←───│ GPIO 13  (TX D6)         │
-  DS92LV1021A DIN7 ←───│ GPIO 14  (TX D7)         │
-  DS92LV1021A DIN8 ←───│ GPIO 15  (TX D8)         │
-  DS92LV1021A DIN9 ←───│ GPIO 16  (TX D9)         │
-  DS92LV1021A TCLK ←───│ GPIO 17  (TX CLK OUT)    │
-  DS92LV1021A PDB  ←───│ GPIO 18  (TX OE)         │
-                        │                          │
-                        │          PARLIO RX        │
-  DS92LV1212A DOUT0 ──→│ GPIO 19  (RX D0)         │
-  DS92LV1212A DOUT1 ──→│ GPIO 20  (RX D1)         │
-  DS92LV1212A DOUT2 ──→│ GPIO 21  (RX D2)         │
-  DS92LV1212A DOUT3 ──→│ GPIO 22  (RX D3)         │
-  DS92LV1212A DOUT4 ──→│ GPIO 23  (RX D4)         │
-  DS92LV1212A DOUT5 ──→│ GPIO 24  (RX D5)         │
-  DS92LV1212A DOUT6 ──→│ GPIO 25  (RX D6)         │
-  DS92LV1212A DOUT7 ──→│ GPIO 26  (RX D7)         │
-  DS92LV1212A DOUT8 ──→│ GPIO 27  (RX D8)         │
-  DS92LV1212A DOUT9 ──→│ GPIO 28  (RX D9)         │
-  DS92LV1212A RCLK  ──→│ GPIO 29  (RX CLK IN)     │
-  DS92LV1212A LOCK  ──→│ GPIO 30  (LOCK status)   │
-                        │                          │
-                        │          I2S (local codec)│
-  I2S DAC/ADC BCK  ←──→│ GPIO 31                  │
-  I2S DAC/ADC WS   ←──→│ GPIO 32                  │
-  I2S DAC DOUT     ←───│ GPIO 33                  │
-  I2S ADC DIN      ───→│ GPIO 34                  │
-                        │                          │
-                        │          EMAC (free!)     │
-                        │ GPIO 35-43 → Ethernet PHY│
-                        │   (independent of bus)    │
-                        │                          │
-                        │ GPIO 44+ → UART, SPI,    │
-                        │   LEDs, buttons, etc.     │
-                        └──────────────────────────┘
+                        ┌────────────────────────┐
+  98.304 MHz clock ────→│ GPIO 6   (EXT CLK IN)  │   Master: crystal oscillator
+  (or Si5351A CLK0)     │                        │   Slave: Si5351A output
+                        │                        │
+                        │       AudioBus PHY      │   ← ONLY 5 PINS!
+  SN65LVDT41 D     ←───│ GPIO 7   (PARLIO TX)   │   (1-bit serial out)
+  SN65LVDT41 R     ───→│ GPIO 8   (PARLIO RX)   │   (1-bit serial in)
+  SN65LVDT41 DE    ←───│ GPIO 9   (direction)   │   HIGH=TX, LOW=RX
+                        │ GPIO 10  (PARLIO CLK)  │
+                        │                        │
+  Si5351A SDA      ←──→│ GPIO 3   (I2C)         │   Slave only (clock adjust)
+  Si5351A SCL      ←───│ GPIO 4   (I2C)         │
+                        │                        │
+                        │       I2S (local codec) │
+  I2S DAC/ADC BCK  ←──→│ GPIO 31                │
+  I2S DAC/ADC WS   ←──→│ GPIO 32                │
+  I2S DAC DOUT     ←───│ GPIO 33                │
+  I2S ADC DIN      ───→│ GPIO 34                │
+                        │                        │
+                        │       EMAC (FREE!)      │
+                        │ GPIO 35-43 → Eth PHY   │   Independent networking
+                        │                        │
+                        │ GPIO 44+ → UART, SPI,  │
+                        │   LEDs, buttons, etc.   │   41+ GPIOs remaining!
+                        └────────────────────────┘
 
-GPIO budget: 24 (bus) + 4 (I2S) + 9 (Ethernet) + 2 (UART) = 39 of 55 used
-Remaining: 16 GPIOs free
+GPIO budget: 5 (bus) + 2 (I2C) + 4 (I2S) + 9 (Ethernet) + 2 (UART) = 22 of 55
+Remaining: 33 GPIOs free!
 ```
+
+Compare with the 2-chip SerDes: 24 GPIO pins for the bus alone. The single-chip approach frees **19 extra GPIOs**.
 
 ### Twisted Pair Wiring
 
@@ -338,11 +339,13 @@ Remaining: 16 GPIOs free
 
 | Clock | Part Number | Price | Notes |
 |-------|-------------|-------|-------|
-| 49.152 MHz (48k family) | SiT8008B-49-152 | $1.50 | MEMS, ±25ppm, SOT-23 |
-| 49.152 MHz (48k family) | ECS-3953M-490 | $0.80 | ±50ppm |
-| Dual family | Si5351A-B-GT | $1.50 | I2C programmable, 49.152 + 45.158 MHz |
+| 98.304 MHz (2× 48k base) | Custom or Si5351A | $1.50 | Master: crystal osc. Si5351A can generate this from 25 MHz. |
+| 49.152 MHz (for 2-chip SerDes) | SiT8008B-49-152 | $1.50 | MEMS, ±25ppm, SOT-23 |
+| Dual family | Si5351A-B-GT | $1.50 | I2C programmable, generates any audio clock |
 
-Slave nodes do **not** need a clock oscillator — they recover the clock from the bus via the DS92LV1212A CDR.
+**Single-chip PHY**: Master needs a 98.304 MHz clock source. Slave uses Si5351A (~$1.50) to generate a local clock, adjusted via I2C software PLL locked to master frame timing.
+
+**2-chip SerDes PHY**: Slave nodes recover the clock from the bus via DS92LV1212A CDR — no local oscillator needed.
 
 ## Software Architecture
 

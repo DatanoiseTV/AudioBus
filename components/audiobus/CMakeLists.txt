@@ -4,6 +4,7 @@ idf_component_register(
         "src/audiobus_frame.c"
         "src/audiobus_discovery.c"
         "src/audiobus_tunnel.c"
+        "src/phy/phy_lvds_oneic.c"
         "src/phy/phy_lvds_serdes.c"
         "src/codec/codec_8b10b.c"
     INCLUDE_DIRS

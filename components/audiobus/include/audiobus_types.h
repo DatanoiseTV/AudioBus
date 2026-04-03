@@ -17,27 +17,42 @@ extern "C" {
 /* ---------------------------------------------------------------------------
  * Physical layer constants
  *
- * LVDS SerDes PHY (DS92LV1021A / DS92LV1212A):
- *   Parallel clock:  49.152 MHz (48kHz family) or 45.1584 MHz (44.1kHz family)
- *   Symbol width:    10 bits (8b10b encoded)
- *   Line rate:       491.52 Mbps / 451.584 Mbps
- *   Effective data:  393.216 Mbps / 361.267 Mbps
- *   Single twisted pair, half-duplex with direction switching
- *   Self-clocking via DS92LV1212A CDR PLL (no separate clock wire needed)
- *   ESP32-P4 EMAC remains free for normal Ethernet/WiFi networking
+ * PHY Option 1 — LVDS Transceiver (SN65LVDT41, RECOMMENDED):
+ *   Single chip per port! Driver + receiver on one differential pair.
+ *   ESP32-P4 PARLIO 1-bit mode at 98.304 MHz (2× audio clock).
+ *   8b10b encoding done in software, bit-serialized by PARLIO.
+ *   Line rate: 98.304 Mbps half-duplex.
+ *   Slave clock: Si5351A with software PLL locked to master frame timing.
+ *   Only 5 GPIO pins per port. ~$2/port.
+ *   25 channels/direction at 48 kHz/32-bit (34 at 24-bit).
+ *
+ * PHY Option 2 — LVDS 10:1 SerDes (DS92LV1021A + DS92LV1212A):
+ *   Two chips per port (serializer + deserializer with CDR).
+ *   ESP32-P4 PARLIO 16-bit mode at 49.152 MHz → 491 Mbps line rate.
+ *   Hardware CDR in deserializer = true self-clocking.
+ *   24 GPIO pins per port. ~$7/port.
+ *   64 channels/direction at 48 kHz/32-bit.
+ *
+ * Both options: single twisted pair, half-duplex, ESP32-P4 EMAC free.
  * --------------------------------------------------------------------------- */
 
-/* Clock frequencies for LVDS SerDes PHY (parallel interface to serializer) */
-#define ABUS_MCLK_48K       49152000    /* 48kHz family master clock */
-#define ABUS_MCLK_44K       45158400    /* 44.1kHz family master clock */
+/* Clock frequencies */
+#define ABUS_MCLK_48K       49152000    /* 48kHz family base clock */
+#define ABUS_MCLK_44K       45158400    /* 44.1kHz family base clock */
+#define ABUS_BITCLK_48K     98304000    /* 2× base = PARLIO 1-bit clock (48k family) */
+#define ABUS_BITCLK_44K     90316800    /* 2× base = PARLIO 1-bit clock (44.1k family) */
 
-/* Symbols per frame = MCLK / Fs */
+/* Symbols per frame = MCLK / Fs (one 8b10b symbol per MCLK cycle) */
 #define ABUS_SYMBOLS_48K     1024       /* 49152000 / 48000 */
 #define ABUS_SYMBOLS_96K      512       /* 49152000 / 96000 */
 #define ABUS_SYMBOLS_44K     1024       /* 45158400 / 44100 */
 #define ABUS_SYMBOLS_88K      512       /* 45158400 / 88200 */
 
-/* Each 10-bit symbol carries 8 data bits (8b10b), so bytes == symbols */
+/* Bits per frame for 1-bit PHY = symbols × 10 (8b10b) */
+#define ABUS_FRAME_BITS_48K  10240      /* 1024 × 10 */
+#define ABUS_FRAME_BITS_96K   5120      /* 512 × 10 */
+
+/* Data bytes per frame (after 8b10b decode) = symbols */
 #define ABUS_FRAME_BYTES_48K  1024
 #define ABUS_FRAME_BYTES_96K   512
 #define ABUS_FRAME_BYTES_MAX  1024
@@ -72,7 +87,8 @@ typedef enum {
 } abus_role_t;
 
 typedef enum {
-    ABUS_PHY_LVDS_SERDES    = 0,    /* DS92LV1021A/1212A via PARLIO (recommended) */
+    ABUS_PHY_LVDS_SINGLE    = 0,    /* SN65LVDT41 single-chip transceiver (recommended) */
+    ABUS_PHY_LVDS_SERDES    = 1,    /* DS92LV1021A/1212A 10:1 SerDes (max performance) */
 } abus_phy_type_t;
 
 typedef enum {

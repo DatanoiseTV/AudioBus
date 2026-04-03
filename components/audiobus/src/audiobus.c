@@ -396,8 +396,11 @@ esp_err_t abus_init(const abus_config_t *config, abus_handle_t *out_handle) {
 
     /* Create PHY */
     esp_err_t ret;
-    if (config->phy_type == ABUS_PHY_LVDS_SERDES) {
-        ret = abus_phy_lvds_create(&config->pins.lvds_pins, config->sample_rate,
+    if (config->phy_type == ABUS_PHY_LVDS_SINGLE) {
+        ret = abus_phy_oneic_create(&config->pins.oneic_pins, config->sample_rate,
+                                    config->role, &h->phy);
+    } else if (config->phy_type == ABUS_PHY_LVDS_SERDES) {
+        ret = abus_phy_lvds_create(&config->pins.serdes_pins, config->sample_rate,
                                    config->role, &h->phy);
     } else {
         ESP_LOGE(TAG, "Unsupported PHY type");
