@@ -7,13 +7,19 @@ idf_component_register(
         "src/phy/phy_lvds_oneic.c"
         "src/phy/phy_lvds_serdes.c"
         "src/codec/codec_8b10b.c"
+        "src/net/abus_net.c"
+        "src/net/abus_ptp.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         esp_driver_parlio
         esp_driver_gpio
+        esp_eth
+        esp_event
+        esp_timer
         freertos
         esp_common
+        esp_netif
         log
         heap
 )
