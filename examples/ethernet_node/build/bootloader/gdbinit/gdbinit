@@ -1,0 +1,2 @@
+source /Users/syso/dev/priv/audiobus/examples/ethernet_node/build/bootloader/gdbinit/symbols
+source /Users/syso/dev/priv/audiobus/examples/ethernet_node/build/bootloader/gdbinit/connect

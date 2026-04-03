@@ -310,8 +310,10 @@ static bool IRAM_ATTR rx_done_isr(parlio_rx_unit_handle_t unit,
         .delimiter = ctx->rx_delimiter,
         .flags.partial_rx_en = false,
     };
+    bool hp2 = false;
     parlio_rx_unit_receive_from_isr(ctx->rx_unit, ctx->rx_buf[next_idx],
-                                    MAX_RX_BUF_BYTES, &recv_cfg, &hp_woken);
+                                    MAX_RX_BUF_BYTES, &recv_cfg, &hp2);
+    if (hp2) hp_woken = pdTRUE;
     ctx->rx_buf_idx = next_idx;
 
     return hp_woken == pdTRUE;

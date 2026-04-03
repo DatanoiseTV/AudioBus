@@ -307,8 +307,10 @@ static bool IRAM_ATTR rx_done_cb(parlio_rx_unit_handle_t unit,
     uint8_t next = ctx->rx_buf_idx ^ 1;
     BaseType_t hp = pdFALSE;
     parlio_receive_config_t rcfg = { .delimiter = ctx->rx_delimiter };
+    bool hp2 = false;
     parlio_rx_unit_receive_from_isr(ctx->rx_unit, ctx->rx_bitstream[next],
-                                    MAX_BITSTREAM_BYTES, &rcfg, &hp);
+                                    MAX_BITSTREAM_BYTES, &rcfg, &hp2);
+    if (hp2) hp = pdTRUE;
     ctx->rx_buf_idx = next;
     return hp == pdTRUE;
 }

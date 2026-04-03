@@ -1,0 +1,9 @@
+Command: cmake -G Ninja -B /Users/syso/dev/priv/audiobus/examples/ethernet_node/build -DPYTHON_DEPS_CHECKED=1 -DPYTHON=/Users/syso/.espressif/python_env/idf6.0_py3.14_env/bin/python -DESP_PLATFORM=1 -DIDF_TARGET=esp32p4 -DCCACHE_ENABLE=False /Users/syso/dev/priv/audiobus/examples/ethernet_node
+Configuration Report               
+ ───────────────────────────────── 
+   Parser Version: 1               
+   Verbosity: default              
+   Defaults policy: sdkconfig      
+   Status: Finished successfully   
+                                   
+ ───────────────────────────────── 

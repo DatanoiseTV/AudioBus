@@ -337,7 +337,7 @@ static esp_eth_handle_t init_ethernet(void) {
     phy_config.phy_addr = P4NANO_ETH_PHY_ADDR;
     phy_config.reset_gpio_num = P4NANO_ETH_PHY_RST;
 
-    esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_generic(&phy_config);
 
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = NULL;

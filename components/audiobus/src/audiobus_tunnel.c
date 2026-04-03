@@ -48,7 +48,8 @@ struct abus_tunnel_ctx {
     uint8_t  midi_tx_len[ABUS_MAX_NODES];
 
     /* RX callback */
-    abus_tunnel_cb_t rx_cb;
+    void (*rx_cb)(uint8_t node_id, abus_tunnel_type_t type,
+                  const uint8_t *data, uint16_t len, void *ctx);
     void *rx_cb_ctx;
 };
 

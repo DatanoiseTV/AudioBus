@@ -178,6 +178,9 @@ struct abus_net_handle {
  * Multicast MAC helpers
  * --------------------------------------------------------------------------- */
 
+/* Forward declarations */
+static int gpio_idx_for_uid(struct abus_net_handle *h, uint32_t uid);
+
 static void stream_id_to_mcast(uint16_t stream_id, uint8_t *mac) {
     mac[0] = 0x01; mac[1] = 0x60; mac[2] = 0xAB;
     mac[3] = (stream_id >> 8) & 0xFF;

@@ -28,6 +28,7 @@
 
 #include "audiobus_types.h"
 #include "esp_err.h"
+#include "esp_eth_driver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -299,6 +300,12 @@ typedef struct abus_net_handle *abus_net_handle_t;
 
 /** Initialize Ethernet transport. Configures EMAC, starts PTP, begins discovery. */
 esp_err_t abus_net_init(const abus_net_config_t *config, abus_net_handle_t *out);
+
+/**
+ * Attach to an already-initialized Ethernet handle.
+ * AudioBus coexists with the ESP-IDF IP stack on the same EMAC port.
+ */
+esp_err_t abus_net_attach_eth(abus_net_handle_t h, esp_eth_handle_t eth);
 
 /** Start the transport (enable EMAC, begin beaconing). */
 esp_err_t abus_net_start(abus_net_handle_t h);
