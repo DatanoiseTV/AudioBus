@@ -7582,4 +7582,1540 @@ Authors' Addresses
    Sylwester Sosnowski
    DatanoiseTV
    Email: tbd@datanoise.tv
+
+3.6.  Comparison with Existing Protocols
+
+   AudioBus is designed to address fundamental
+   limitations found in the two dominant
+   networked audio protocols: AES67 and Dante.
+   This section provides a formal technical
+   comparison across the dimensions most
+   relevant to real-time audio transport.
+
+3.6.1.  AES67 Overview
+
+   AES67 [AES67-2018] defines interoperability
+   for audio-over-IP using RTP over UDP/IP
+   (Layer 3), with Session Announcement
+   Protocol (SAP) and Session Description
+   Protocol (SDP) for stream discovery.  Clock
+   synchronization uses IEEE 1588-2008 (PTPv2).
+
+   Key characteristics:
+
+   -  Transport: RTP/UDP/IPv4 multicast.
+   -  Discovery: SAP with 300-second default
+      announce interval.
+   -  Minimum packet interval: 1000 us
+      (48 samples at 48 kHz).
+   -  Encoding: L24 (24-bit linear PCM).
+   -  Reconfiguration: requires new SDP
+      session; full stream restart.
+
+3.6.2.  Dante Overview
+
+   Dante (Audinate) is a proprietary networked
+   audio protocol.  It uses a combination of
+   mDNS/DNS-SD for discovery and proprietary
+   packet formats for audio transport over
+   UDP/IP.
+
+   Key characteristics:
+
+   -  Transport: proprietary over UDP/IP.
+   -  Discovery: mDNS/DNS-SD, 3-10 seconds
+      typical.
+   -  Minimum packet interval: ~31 us
+      (single-sample mode on Ultimo/Brooklyn).
+   -  Encoding: 16, 24, or 32-bit PCM.
+   -  Reconfiguration: requires Dante
+      Controller; brief audio dropout on
+      channel changes.
+   -  Licensing: per-device royalty to
+      Audinate.
+
+3.6.3.  Comparative Analysis
+
+   Table 3.5-1 summarizes the key differences.
+
+   +---------------------+-----------+---------+-------+
+   | Feature             | AudioBus  | AES67   | Dante |
+   +---------------------+-----------+---------+-------+
+   | Transport layer     | L2 (Eth)  | L3 (IP) | L3    |
+   | Minimum latency     | 42 us     | 1000 us | 150us |
+   | Typical low-lat.    | 125 us    | 1000 us | 250us |
+   | Discovery time      | <200 ms   | 300 s   |3-10 s |
+   | Dynamic reconfig.   | Hitless   | Restart | Brief |
+   |                     |           |         |dropout|
+   | Per-ch subscribe    | Yes       | No      | Yes   |
+   | Control tunneling   | Native    | No      | No    |
+   | Switch requirements | Any L2    | L3+IGMP | Dante |
+   |                     | switch    | router  |certif.|
+   | Redundancy failover | 0 ms      | Net-dep.| ~5 ms |
+   | Protocol openness   | Open spec | Open    |Propri-|
+   |                     | no fees   | std     |etary  |
+   | Self-describing pkt | Yes       | No      | No    |
+   | LVDS serial mode    | Yes       | No      | No    |
+   | Max ch (100 Mbps)   | 64@48k    | 48@48k  | 64@48k|
+   |                     | /32-bit   | /24-bit |       |
+   +---------------------+-----------+---------+-------+
+
+   Table 3.5-1: Protocol Comparison Summary
+
+3.6.4.  Latency Advantage
+
+   AudioBus achieves lower latency than AES67
+   and Dante through three design choices:
+
+   (a) Layer 2 transport eliminates IP and UDP
+       header processing, routing table lookups,
+       and TTL management.  A Layer 2 frame
+       traverses a cut-through switch in 2-3 us;
+       an IP packet requires store-and-forward
+       processing of at minimum 5-10 us.
+
+   (b) Single-sample packet mode (Section 10A)
+       reduces packetization delay to one sample
+       period (20.83 us at 48 kHz).  AES67
+       mandates a minimum of 48 samples per
+       packet (1000 us).
+
+   (c) Self-describing packets eliminate the
+       need for prior session negotiation.  A
+       listener MAY begin decoding audio from
+       the first packet received, without
+       waiting for an SDP session description
+       or controller handshake.
+
+3.6.5.  Discovery Advantage
+
+   AudioBus rapid discovery (Section 8A)
+   completes in under 200 ms.  SAP announces
+   at a default interval of 300 seconds
+   [RFC2974], meaning a new listener must wait
+   up to 5 minutes to learn of existing streams.
+   Dante's mDNS-based discovery typically
+   requires 3-10 seconds.
+
+3.6.6.  Openness Advantage
+
+   AudioBus is fully specified in this open
+   document with no licensing fees, royalties,
+   or certification requirements.  Dante
+   requires per-device licensing from Audinate
+   Pty Ltd.  AES67 is an open standard but
+   mandates IP infrastructure and does not
+   define a complete self-configuring system.
+
+
+19.  Rapid Discovery Protocol
+
+   (REPLACES Section 8.2 "Beacon Timing")
+
+   This section defines an accelerated three-
+   phase discovery mechanism that allows a new
+   node to discover all existing streams and
+   begin receiving audio within 200 ms of link
+   detection.
+
+   The three phases are:
+
+      Phase 1 - ANNOUNCE:     0 to  50 ms
+      Phase 2 - OFFER:       50 to 100 ms
+      Phase 3 - BIND:       100 to 200 ms
+
+19.1.  Phase 1: ANNOUNCE (0-50 ms)
+
+   Upon transitioning from INIT to DISCOVER
+   (Section 3.5, Figure 2), a node MUST transmit
+   three BEACON packets in rapid succession.
+   These are called "beacon bursts."
+
+   Burst timing:
+
+      Burst 1:  T_link + R
+      Burst 2:  T_link + R + 15 ms
+      Burst 3:  T_link + R + 30 ms
+
+   Where:
+
+      T_link is the time at which the physical
+      link is detected.
+
+      R is a random delay uniformly distributed
+      in [0, 5) ms, derived from the low 16 bits
+      of the node's UID.  This prevents
+      collision when two nodes boot on the same
+      switch simultaneously.
+
+   The burst interval of 15 ms is chosen to be
+   shorter than the minimum audio packet
+   interval in normal mode (125 us is shorter,
+   but beacon processing is lower priority;
+   15 ms ensures all nodes process at least one
+   burst even under load).
+
+   Each burst beacon MUST set the FIRST_SEEN
+   flag in the beacon Flags field:
+
+      Bit 4 (0x0800): FIRST_SEEN.  Set to 1
+         in beacon burst packets transmitted
+         during Phase 1.  Set to 0 in all
+         subsequent periodic beacons.
+
+   The FIRST_SEEN flag signals to existing nodes
+   that this beacon originates from a newly
+   arrived node.  Existing nodes use this flag
+   to trigger Phase 2.
+
+   ABNF for the extended flags field:
+
+   flags = 2OCTET  ; big-endian, 16 bits
+   ; Bit 0:     Grandmaster
+   ; Bit 1:     LVDS capable
+   ; Bit 2:     Ethernet capable
+   ; Bit 3:     Bridge node
+   ; Bit 4:     FIRST_SEEN (new)
+   ; Bit 5:     REDUNDANCY (Section X.1)
+   ; Bit 6:     ULTRA_LOW capable (Sec 10A)
+   ; Bits 7-15: Reserved, MUST be zero
+
+19.2.  Phase 2: OFFER (50-100 ms)
+
+   When an existing node receives a beacon with
+   the FIRST_SEEN flag set and the Source UID is
+   not present in its local node table, the
+   existing node MUST respond within 50 ms by
+   transmitting a STREAM_ANNOUNCE (Section 9.1)
+   for every stream it currently publishes.
+
+   Offer timing:
+
+      T_offer = T_first_seen + D_offer
+
+   Where D_offer is a per-node random delay
+   uniformly distributed in [0, 50) ms:
+
+      D_offer = (UID mod 50)  [milliseconds]
+
+   This spreads OFFER responses across the 50 ms
+   window to avoid multicast storms when many
+   nodes respond to the same new arrival.
+
+   If the existing node publishes no streams, it
+   MUST NOT send a STREAM_ANNOUNCE.  The beacon
+   response in the normal 1000 ms cycle is
+   sufficient.
+
+   Timeout:  If the new node receives no
+   STREAM_ANNOUNCE packets within 100 ms of its
+   first burst beacon, it concludes that either:
+
+   (a) No talkers exist on the network, or
+   (b) No streams are currently published.
+
+   In either case, the node proceeds to READY
+   state (Section 3.5) and begins periodic
+   beaconing at the normal 1000 ms interval.
+
+19.3.  Phase 3: BIND (100-200 ms)
+
+   Upon receiving one or more STREAM_ANNOUNCE
+   packets, the new node evaluates each against
+   its subscription preferences (configured by
+   the application layer) and transmits
+   SUBSCRIBE packets (Section 9.3) for matching
+   streams.
+
+   The first audio packet from a subscribed
+   stream arrives within the next packet
+   interval after the talker processes the
+   multicast group join.  For a 1000 us packet
+   interval, this is at most 1 ms.  For a 125 us
+   interval, it is at most 125 us.
+
+   Total discovery-to-audio time:
+
+      T_total = T_phase1 + T_phase2 + T_phase3
+                + T_packet_interval
+              <= 50 + 50 + 100 + 1
+              = 201 ms (worst case, 1000 us pkt)
+
+19.4.  Simultaneous Boot
+
+   When two or more nodes boot simultaneously
+   (within a 50 ms window), each transmits its
+   beacon bursts with independent random delays
+   (R).  Because the FIRST_SEEN flag is set in
+   all burst beacons, each node treats the other
+   as a new arrival and responds with
+   STREAM_ANNOUNCE if applicable.
+
+   The random delay R prevents burst collision
+   in the common case.  If two bursts do collide
+   (transmitted within the same microsecond on
+   the same switch port), the switch's multicast
+   forwarding delivers both frames to all ports.
+   The Ethernet FCS detects any corruption from
+   physical-layer collision on half-duplex links
+   (which are NOT RECOMMENDED; full-duplex
+   SHOULD be used).
+
+   After the burst phase, all simultaneously
+   booted nodes hold a complete picture of the
+   network within 100 ms.
+
+19.5.  Steady-State Beacon Timing
+
+   After Phase 1 completes, the node reverts to
+   periodic beaconing at the nominal interval
+   defined in the main specification:
+
+      Nominal interval:  1000 ms
+      Jitter tolerance:  +/- 100 ms
+      FIRST_SEEN flag:   MUST be 0
+
+   All other beacon timing constraints from the
+   main specification continue to apply.
+
+19.6.  Timing Diagram
+
+      New Node          Existing Nodes
+         |                    |
+   T=0   |---BEACON(FS=1)--->|  Burst 1
+   T=15  |---BEACON(FS=1)--->|  Burst 2
+   T=30  |---BEACON(FS=1)--->|  Burst 3
+         |                    |
+         |   Phase 2 begins   |
+   T=35  |<--STREAM_ANN #1---|  Node A
+   T=42  |<--STREAM_ANN #2---|  Node B
+   T=68  |<--STREAM_ANN #3---|  Node C
+         |                    |
+         |   Phase 3 begins   |
+   T=105 |---SUBSCRIBE #1--->|  To Node A
+   T=106 |---SUBSCRIBE #2--->|  To Node C
+         |                    |
+   T=107 |<==AUDIO DATA======|  First pkt
+         |                    |
+   T=1030|---BEACON(FS=0)--->|  Normal
+         |                    |
+
+   FS = FIRST_SEEN flag value.
+   Times in milliseconds, approximate.
+
+      Figure 8A-1: Rapid Discovery Timing
+
+19.7.  Comparison with Existing Protocols
+
+   +------------------+----------+---------+------+
+   | Metric           | AudioBus | AES67   |Dante |
+   +------------------+----------+---------+------+
+   | Discovery method | Beacon   | SAP/SDP |mDNS  |
+   |                  | burst    |         |      |
+   | Time to discover | <100 ms  | 300 s   |3-10s |
+   | Time to audio    | <200 ms  | ~301 s  |4-11s |
+   | Explicit signal  | FIRST_   | None    |None  |
+   |   for new node   | SEEN     |         |      |
+   | Burst redundancy | 3x       | 1x      |1x   |
+   +------------------+----------+---------+------+
+
+   Table 8A-1: Discovery Protocol Comparison
+
+
+20.  Ultra-Low Latency Mode
+
+   This section defines a single-sample packet
+   mode for applications that require the
+   minimum possible end-to-end latency, such as
+   real-time instrument monitoring and live
+   feedback systems.
+
+20.1.  Single-Sample Packet Format
+
+   In ultra-low latency mode, each audio packet
+   carries exactly one sample per channel.  The
+   Samples per Channel field (Section 10.1) is
+   set to 1.
+
+   The ULTRA_LOW flag MUST be set in the
+   stream announcement Stream Flags field
+   (Section 9.1):
+
+      Bit 2 (0x2000 in Stream Flags):
+         ULTRA_LOW.  Set to 1 when the stream
+         operates in single-sample mode.
+
+   ABNF addition to stream-flags:
+
+   ; Bit 0: Active
+   ; Bit 1: Persistent
+   ; Bit 2: ULTRA_LOW (new)
+   ; Bit 3: RATE_CHANGE_PENDING (Sec 9A)
+   ; Bit 4: ADAPT_ENABLED (Sec 10B)
+   ; Bits 5-15: Reserved, MUST be zero
+
+20.2.  Minimum Frame Size
+
+   A single-sample audio packet for one channel
+   of 32-bit audio has the following wire size
+   on Ethernet:
+
+   +-----------------------------+--------+
+   | Component                   | Octets |
+   +-----------------------------+--------+
+   | Destination MAC             |      6 |
+   | Source MAC                  |      6 |
+   | EtherType                   |      2 |
+   | AudioBus Common Header      |     12 |
+   | Audio Header (Sec 10.1)     |     20 |
+   | Audio Data (1 ch x 4 B)     |      4 |
+   +-----------------------------+--------+
+   | Subtotal                    |     50 |
+   | Padding to 64 B minimum     |     10 |
+   | FCS                         |      4 |
+   +-----------------------------+--------+
+   | Total on wire               |     64 |
+   +-----------------------------+--------+
+
+   Table 10A-1: Minimum Ultra-Low Frame
+
+   Note: the IEEE 802.3 minimum frame size is
+   64 octets including FCS.  The 10-octet
+   padding is appended by the Ethernet MAC.
+
+   For multi-channel packets, audio data grows
+   by (bit_depth / 8) octets per channel.  The
+   frame exceeds 64 octets (no padding needed)
+   when:
+
+      channels > 10  (at 32-bit depth)
+      channels > 14  (at 24-bit depth)
+      channels > 21  (at 16-bit depth)
+
+20.3.  Latency Analysis
+
+   End-to-end latency from talker sample
+   capture to listener sample playout through
+   one cut-through Ethernet switch:
+
+   +---------------------------+----------+
+   | Component                 | Time     |
+   +---------------------------+----------+
+   | Talker DMA + MAC TX       | ~5 us    |
+   | Wire propagation (5 m)    | ~0.025us |
+   | Cut-through switch fabric | ~2 us    |
+   | Wire propagation (5 m)    | ~0.025us |
+   | Listener MAC RX + DMA     | ~5 us    |
+   | Listener decode + route   | ~1 us    |
+   +---------------------------+----------+
+   | Subtotal (network path)   | ~13 us   |
+   +---------------------------+----------+
+   | Packetization delay       | 20.83 us |
+   |   (one sample at 48 kHz)  |          |
+   | Frame serialization       | ~5.12 us |
+   |   (64 B at 100 Mbps)      |          |
+   +---------------------------+----------+
+   | Total without buffer      | ~39 us   |
+   | With 50 us playout buffer | ~89 us   |
+   +---------------------------+----------+
+
+   Table 10A-2: Ultra-Low Latency Breakdown
+
+   The 50 us playout buffer absorbs jitter from
+   the cut-through switch.  Without the buffer,
+   the theoretical minimum is approximately
+   39 us, though this requires deterministic
+   DMA scheduling.
+
+   Conservatively stated:
+
+      Without playout buffer: ~42 us
+      With playout buffer:    ~92 us
+
+   These figures include margin for real-world
+   variation in DMA and switch timing.
+
+20.4.  Latency Comparison
+
+   +---------------------+--------+------+------+
+   | Configuration       |AudioBus|AES67 |Dante |
+   +---------------------+--------+------+------+
+   | Minimum possible    | 42 us  |1000us|150 us|
+   | With safety buffer  | 92 us  |1000us|250 us|
+   +---------------------+--------+------+------+
+
+   Table 10A-3: Ultra-Low Latency Comparison
+
+   AES67 cannot achieve latencies below 1000 us
+   because the minimum specified packet interval
+   is 1 ms (48 samples at 48 kHz).  Dante's
+   Ultimo chipset supports a single-sample mode
+   at approximately 150 us minimum, but this
+   mode is limited to specific hardware and is
+   not available on all Dante devices.
+
+20.5.  Bandwidth Analysis
+
+   Single-sample mode incurs high per-packet
+   overhead relative to audio payload.  The
+   bandwidth for one stream is:
+
+      BW = Fs * frame_bytes * 8  [bits/s]
+
+   Where frame_bytes includes Ethernet header
+   (14), AudioBus header (12), audio header
+   (20), audio data, padding, and FCS (4).
+
+   +------+--------+-----------+-----------+
+   | Ch   | Depth  | Frame (B) | BW (Mbps) |
+   +------+--------+-----------+-----------+
+   |    1 | 32-bit |        64 |     24.58 |
+   |    2 | 32-bit |        64 |     24.58 |
+   |    2 | 24-bit |        64 |     24.58 |
+   |    4 | 32-bit |        68 |     26.11 |
+   |    8 | 32-bit |        84 |     32.26 |
+   |   16 | 32-bit |       116 |     44.54 |
+   |   32 | 32-bit |       180 |     69.12 |
+   |   48 | 32-bit |       244 |     93.70 |
+   |   64 | 32-bit |       308 |    118.27 |
+   +------+--------+-----------+-----------+
+
+   Table 10A-4: Ultra-Low Bandwidth at 48 kHz
+
+   Calculation for 2 channels, 32-bit:
+
+      Audio data = 2 * 4 = 8 bytes
+      Total before pad = 14 + 12 + 20 + 8 = 54
+      Padded to 60 B + 4 B FCS = 64 B
+      BW = 48000 * 64 * 8 = 24,576,000 bps
+         = 24.58 Mbps
+
+   Calculation for 32 channels, 32-bit:
+
+      Audio data = 32 * 4 = 128 bytes
+      Total = 14 + 12 + 20 + 128 = 174 B
+      +FCS = 178 B, round to 180 B (alignment)
+      BW = 48000 * 180 * 8 = 69,120,000 bps
+         = 69.12 Mbps
+
+   Feasibility on 100 Mbps Ethernet:
+
+      At 100 Mbps, the maximum usable bandwidth
+      for audio (at 80% utilization cap per
+      Section 5.7) is 80 Mbps.  Ultra-low
+      latency mode is feasible for:
+
+      - Up to 32 channels of 32-bit audio
+      - Up to 48 channels of 24-bit audio
+      - Up to 64 channels of 16-bit audio
+
+      Beyond these limits, implementations MUST
+      use normal (multi-sample) packet mode or
+      Gigabit Ethernet.
+
+20.6.  Mode Selection
+
+   Ultra-low latency mode SHOULD be used only
+   when the application requires end-to-end
+   latency below 250 us.  For all other cases,
+   the normal packet interval tiers
+   (Section 10.5) provide equivalent audio
+   quality with substantially lower bandwidth
+   overhead and CPU utilization.
+
+   Selection criteria:
+
+   +----------------------------+-----------+
+   | Requirement                | Mode      |
+   +----------------------------+-----------+
+   | Latency < 100 us          | Ultra-low |
+   | Latency 100-250 us        | 125 us    |
+   | Latency 250-500 us        | 250 us    |
+   | Latency > 500 us          | 500+ us   |
+   +----------------------------+-----------+
+
+   Table 10A-5: Mode Selection Guide
+
+   A talker MUST NOT use ultra-low mode if the
+   network capability probe (Section X.2)
+   indicates a NETWORK_QUALITY score below 70.
+
+   Listeners MUST support ultra-low latency
+   mode if they advertise the ULTRA_LOW flag
+   in their beacon (bit 6 of beacon Flags).
+   Listeners that do not support ultra-low
+   mode MUST NOT subscribe to streams with the
+   ULTRA_LOW stream flag set.
+
+
+21.  Adaptive Packet Interval
+
+   This section defines an algorithm by which a
+   talker automatically adjusts its packet
+   interval to match the observed quality of
+   the network path.
+
+21.1.  Design Rationale
+
+   A fixed packet interval forces a tradeoff
+   between latency (small interval) and
+   robustness (large interval).  The adaptive
+   algorithm allows a talker to start at a
+   conservative interval and reduce it as
+   network quality permits, or increase it when
+   conditions degrade.
+
+21.2.  Tier Ladder
+
+   The adaptive algorithm operates on a discrete
+   set of interval tiers, ordered from highest
+   to lowest latency:
+
+   +------+-----------+--------+----------+
+   | Tier | Interval  | Samp/ch| Use case |
+   |      | (us)      | @48kHz |          |
+   +------+-----------+--------+----------+
+   |    7 | 4000      |    192 | Max eff. |
+   |    6 | 2000      |     96 | High eff.|
+   |    5 | 1000      |     48 | Default  |
+   |    4 | 500       |     24 | Balanced |
+   |    3 | 250       |     12 | Low lat. |
+   |    2 | 125       |      6 | ULL      |
+   |    1 | 62.5      |      3 | Sub-ULL  |
+   |    0 | 31.25     |   1(*) | Near-min |
+   |   -1 | 20.83     |      1 |Ultra-low |
+   +------+-----------+--------+----------+
+
+   (*) At 48 kHz, 31.25 us yields 1.5 samples
+       per interval.  The talker alternates
+       between 1 and 2 samples per packet.
+
+   Tier -1 corresponds to ultra-low latency
+   mode (Section 10A) and is only available if
+   the ULTRA_LOW capability is advertised.
+
+   Table 10B-1: Adaptive Interval Tiers
+
+21.3.  Observation Window
+
+   The talker collects metrics over an
+   observation window of 100 consecutive
+   packets.  At the end of each window, the
+   talker evaluates step-down and step-up
+   conditions.
+
+   Two metrics are computed:
+
+   jitter_rms:  The root-mean-square of the
+      inter-packet arrival time deviation,
+      computed from PONG timestamps
+      (Section 13.2) or from listener feedback
+      if available.
+
+      jitter_rms = sqrt(
+        (1/N) * sum((t_i - t_expected)^2)
+      )
+
+      Where N = 100, t_i is the actual arrival
+      time, and t_expected is the nominal
+      arrival time based on the current packet
+      interval.
+
+   loss_ratio:  The fraction of packets lost
+      in the window, derived from sequence
+      number gaps (Section 10.6).
+
+      loss_ratio = gaps / (100 + gaps)
+
+21.4.  Threshold Conditions
+
+   Step-down (decrease interval, lower latency):
+
+      jitter_rms < 50 us  AND  loss_ratio == 0
+
+   Step-up (increase interval, higher latency):
+
+      jitter_rms > 200 us  OR  loss_ratio > 0.1%
+
+   Neutral zone:
+
+      If neither condition is met, the interval
+      remains unchanged.
+
+21.5.  Hysteresis
+
+   A tier change MUST NOT occur until the
+   triggering condition has been sustained for
+   3 consecutive observation windows (300
+   packets).
+
+   This prevents oscillation due to transient
+   network events.  The hysteresis counter
+   resets to zero whenever the condition is no
+   longer met.
+
+   State machine:
+
+     STABLE ──[condition met]──> PENDING(1)
+     PENDING(1) ──[met]──> PENDING(2)
+     PENDING(2) ──[met]──> CHANGE TIER
+     PENDING(N) ──[not met]──> STABLE
+
+21.6.  Tier Change Procedure
+
+   When a tier change is triggered:
+
+   1.  The talker computes the new packet
+       interval from the tier ladder.
+
+   2.  The talker transmits a new
+       STREAM_ANNOUNCE with the updated Packet
+       Interval field.
+
+   3.  Starting at the next packet boundary,
+       the talker begins transmitting at the
+       new interval.
+
+   Listeners detect the interval change by
+   observing the inter-packet arrival time.
+   No explicit signaling is required beyond
+   the updated STREAM_ANNOUNCE, because the
+   audio packet header is self-describing.
+
+   Detection algorithm at the listener:
+
+   1.  Compute arrival delta between consecutive
+       packets: delta = t_n - t_(n-1).
+
+   2.  If delta differs from the expected
+       interval by more than 50%, update the
+       expected interval:
+       expected = measured delta (rounded to
+       the nearest tier value).
+
+   3.  Adjust playout buffer depth to match
+       the new interval.
+
+21.7.  ADAPT_STATE Field
+
+   A talker using adaptive mode MUST set bit 4
+   (ADAPT_ENABLED) in the Stream Flags field of
+   STREAM_ANNOUNCE (Section 9.1).
+
+   The talker also includes an ADAPT_STATE
+   field in the stream announcement.  This
+   field occupies the 2-octet Reserved field
+   (octets 14-15 of the announce payload) when
+   ADAPT_ENABLED is set:
+
+   ABNF:
+
+   adapt-state    = current-tier window-counter
+
+   current-tier   = OCTET
+                    ; signed, -1..7
+                    ; current tier index
+
+   window-counter = OCTET
+                    ; 0..255
+                    ; observation windows since
+                    ; last tier change
+
+   When ADAPT_ENABLED is not set, these two
+   octets MUST be zero (maintaining backward
+   compatibility with the Reserved field).
+
+21.8.  Constraints
+
+   The adaptive algorithm MUST NOT reduce the
+   interval below the minimum tier supported
+   by the talker hardware or advertised in the
+   beacon.
+
+   If a listener explicitly requests a specific
+   packet interval (via application-layer
+   configuration), the talker SHOULD honor
+   that request and disable adaptation for the
+   affected stream.
+
+   The initial tier on stream creation MUST be
+   tier 5 (1000 us) unless the application
+   explicitly requests otherwise.
+
+
+22.  Hitless Reconfiguration
+
+   Because every AudioBus audio packet is self-
+   describing (the header carries Channels, Bit
+   Depth, and Sample Rate fields; see
+   Section 10.1), receivers can adapt to stream
+   parameter changes on-the-fly without prior
+   negotiation.
+
+   This section defines the procedures for
+   hitless reconfiguration of active streams.
+
+22.1.  Channel Addition
+
+   Procedure:
+
+   1.  Talker increments the Channels field in
+       the next audio packet header.
+
+   2.  Talker includes audio data for all
+       channels (existing plus new) in the
+       standard interleave order (Sec 10.3).
+
+   3.  Talker transmits updated STREAM_ANNOUNCE
+       with the new channel count.
+
+   Listener behavior:
+
+   1.  Listener detects N_new > N_old by reading
+       the Channels field from the audio packet
+       header.
+
+   2.  Listener allocates new channel buffers,
+       initialized to silence (zero samples).
+
+   3.  Listener begins routing new channels to
+       the application.
+
+   4.  Existing channels continue without
+       interruption.
+
+   Audio impact: zero dropout, zero glitch.
+   The transition is inaudible on existing
+   channels.
+
+22.2.  Channel Removal
+
+   Procedure:
+
+   1.  Talker decrements the Channels field in
+       the next audio packet header.
+
+   2.  Talker transmits audio data for only
+       the remaining channels.
+
+   3.  Talker transmits updated STREAM_ANNOUNCE.
+
+   Listener behavior:
+
+   1.  Listener detects N_new < N_old from the
+       audio packet header.
+
+   2.  Listener fades removed channels to
+       silence over 1 ms (48 samples at 48 kHz)
+       to avoid clicks.
+
+   3.  Listener deallocates removed channel
+       buffers after fade completes.
+
+   4.  Remaining channels continue without
+       interruption.
+
+   Audio impact: zero dropout on remaining
+   channels.  Removed channels receive a 1 ms
+   fade-out.
+
+22.3.  Bit Depth Change
+
+   Procedure:
+
+   1.  Talker changes the Bit Depth field in
+       the next audio packet header.
+
+   2.  Audio data in the packet uses the new
+       sample width immediately.
+
+   3.  Talker transmits updated STREAM_ANNOUNCE.
+
+   Listener behavior:
+
+   1.  Listener reads Bit Depth from every
+       audio packet header (as it already MUST
+       per Section 10.1).
+
+   2.  Listener applies bit-depth conversion
+       (Section 10.2) as needed.
+
+   Audio impact: immediate, inaudible.  No
+   buffer flush or stream interruption.
+
+22.4.  Sample Rate Change
+
+   A sample rate change is NOT hitless because
+   it requires the listener's media clock PLL
+   to re-lock (Section 7.9).  A controlled
+   procedure minimizes disruption.
+
+   New packet subtype:
+
+      Packet Type 0x07: STREAM_RATE_CHANGE
+
+   Payload (6 octets):
+
+   +-------------------------------+--------+
+   | Field                         | Octets |
+   +-------------------------------+--------+
+   | Stream ID                     |      2 |
+   | New Sample Rate               |      4 |
+   +-------------------------------+--------+
+
+   ABNF:
+
+   rate-change-payload = stream-id new-rate
+   stream-id           = 2OCTET  ; big-endian
+   new-rate            = 4OCTET  ; big-endian Hz
+
+   Procedure:
+
+   1.  Talker sets bit 3 (RATE_CHANGE_PENDING,
+       0x1000) in the Stream Flags of
+       STREAM_ANNOUNCE.
+
+   2.  Talker transmits STREAM_RATE_CHANGE
+       packet 3 times at 33 ms intervals
+       (total: 100 ms advance notice).
+
+   3.  At T_change = T_first_rate_change +
+       100 ms, the talker:
+
+       a. Updates Sample Rate in the audio
+          packet header to the new rate.
+
+       b. Recomputes Samples per Channel
+          based on the new rate and current
+          packet interval.
+
+       c. Clears RATE_CHANGE_PENDING in
+          STREAM_ANNOUNCE.
+
+   4.  Talker transmits updated STREAM_ANNOUNCE
+       with the new sample rate.
+
+   Listener behavior:
+
+   1.  On receiving STREAM_RATE_CHANGE, the
+       listener begins PLL re-lock to the new
+       sample rate.
+
+   2.  At T_change, the listener flushes its
+       playout buffer.
+
+   3.  The listener mutes output during PLL
+       re-lock (typically 20-50 ms per
+       Section E.4).
+
+   4.  When the PLL is locked, playout resumes.
+
+   Audio impact: brief mute of approximately
+   50 ms.  No stream teardown or restart.
+
+22.5.  State Diagram
+
+         +------+   ch_add    +------+
+         |      |------------>|      |
+         |      |   ch_remove |      |
+   ----->|STABLE|<------------|ADAPT |
+         |      |   depth_chg |      |
+         |      |<------------|      |
+         +------+             +------+
+            |                    ^
+            |  rate_change       |
+            v                    |
+         +------+  PLL locked +------+
+         |      |------------>|      |
+         | MUTE |             |RELOCK|
+         |      |<------------|      |
+         +------+             +------+
+
+      Figure 9A-1: Hitless Reconfiguration
+                   State Diagram
+
+   STABLE:  Normal operation.  Audio flows.
+
+   ADAPT:  Channel or depth change in progress.
+      Listener adjusts buffers.  Audio continues
+      on all unaffected channels.  Transition
+      back to STABLE is immediate (< 1 ms).
+
+   MUTE:  Rate change announced.  Listener
+      mutes output and prepares PLL.
+
+   RELOCK:  Listener PLL is re-locking to the
+      new sample rate.  Duration: 20-50 ms.
+      On lock, transition to STABLE.
+
+22.6.  Comparison with Existing Protocols
+
+   +-------------------+---------+--------+------+
+   | Operation         |AudioBus | AES67  |Dante |
+   +-------------------+---------+--------+------+
+   | Channel add       | Hitless | New    |Ctrl  |
+   |                   | (0 ms)  | SDP    |reconf|
+   |                   |         | session|~100ms|
+   | Channel remove    | Hitless | New    |Ctrl  |
+   |                   | (0 ms)  | SDP    |reconf|
+   | Bit depth change  | Hitless | Not    |Not   |
+   |                   | (0 ms)  | supp.  |supp. |
+   | Sample rate chg   | ~50 ms  | Full   |Full  |
+   |                   | mute    |restart |restr.|
+   +-------------------+---------+--------+------+
+
+   Table 9A-1: Reconfiguration Comparison
+
+
+23.  Redundancy and Seamless Failover
+
+   This section defines dual-path redundancy
+   for AudioBus Ethernet transport.  Redundancy
+   ensures uninterrupted audio delivery when a
+   network link or switch fails.
+
+23.1.  Redundancy Modes
+
+   Two redundancy modes are defined:
+
+   Mode 1 - Dual-NIC (Seamless Failover):
+
+      The talker transmits an identical copy of
+      every audio packet on two independent
+      Ethernet interfaces (NIC-A and NIC-B).
+      The two interfaces MUST be connected to
+      separate physical switches or separate
+      ports of a switch stack to provide path
+      diversity.
+
+   Mode 2 - Bonded (Bandwidth Doubling):
+
+      Two Ethernet interfaces are bonded using
+      IEEE 802.3ad Link Aggregation (LACP).
+      Packets are distributed across both links
+      by the bonding driver.  This mode doubles
+      available bandwidth but does NOT provide
+      seamless failover; it relies on LACP
+      failover (typically 50-100 ms).
+
+   Mode 1 is RECOMMENDED for live performance
+   and broadcast applications.  Mode 2 is
+   RECOMMENDED for high-channel-count studio
+   installations where bandwidth is the
+   primary constraint.
+
+23.2.  Dual-NIC Packet Duplication
+
+   In Mode 1, the talker transmits every packet
+   (AUDIO, BEACON, STREAM_ANNOUNCE, and all
+   other types) on both interfaces with
+   identical content, including:
+
+   -  Identical Source UID
+   -  Identical Sequence Number
+   -  Identical Presentation Timestamp
+   -  Identical audio payload
+
+   The Source MAC address MAY differ (each NIC
+   has its own MAC).  Listeners MUST NOT use
+   the Source MAC for packet deduplication;
+   they MUST use the Source UID and Sequence
+   Number.
+
+23.3.  Duplicate Detection Algorithm
+
+   A listener receiving packets from two paths
+   MUST detect and discard duplicates:
+
+   1.  Maintain a per-source last_seq table
+       indexed by Source UID.
+
+   2.  On packet arrival, compute:
+
+          is_dup = (source_uid == known_uid)
+                   AND (seq == last_seq[uid])
+
+   3.  If is_dup is true, discard the packet
+       and increment the duplicate counter.
+
+   4.  If is_dup is false, process the packet
+       and update last_seq[uid] = seq.
+
+   Because the listener uses whichever copy
+   arrives first, path diversity provides:
+
+   -  Zero-dropout failover:  If one path
+      fails, the other continues without
+      interruption.
+
+   -  Lower effective jitter:  The listener
+      receives min(jitter_A, jitter_B) for
+      each packet.
+
+23.4.  Dual-Path Topology
+
+        Talker
+       /      \
+    NIC-A    NIC-B
+      |        |
+   Switch-A  Switch-B
+      |        |
+    NIC-A    NIC-B
+       \      /
+       Listener
+
+   Figure X.1-1: Dual-Path Redundancy
+                  Topology
+
+   If only one switch is available, the two
+   NIC connections MAY attach to different
+   ports on the same switch.  This provides
+   NIC and cable redundancy but not switch
+   redundancy.
+
+23.5.  REDUNDANCY Beacon Flag
+
+   A node that supports Mode 1 redundancy
+   MUST set bit 5 (0x0400) in the beacon
+   Flags field:
+
+      Bit 5 (0x0400): REDUNDANCY.  Set to 1
+         if the node has two active Ethernet
+         interfaces and is transmitting
+         duplicate packets.
+
+   Listeners use this flag to expect packets
+   from two paths and to enable duplicate
+   detection.
+
+23.6.  Failover Timing
+
+   In Mode 1, failover is defined as the time
+   between the last packet on the failed path
+   and the first packet processed from the
+   surviving path.
+
+   Because both paths carry identical packets
+   and the listener always uses the first
+   arrival, the failover time is:
+
+      T_failover = 0 ms
+
+   There is no detection delay, no switchover
+   negotiation, and no buffer flush.  The
+   surviving path was already delivering
+   packets; the failed path simply stops.
+
+23.7.  Failover Comparison
+
+   +---------------------+--------+--------+------+
+   | Metric              |AudioBus| AES67  |Dante |
+   +---------------------+--------+--------+------+
+   | Failover time       | 0 ms   | Net-   | ~5ms |
+   |                     |        | depend.|      |
+   | Mechanism           | Dual-  | RSTP / | Dante|
+   |                     | path   | PTP    | sec. |
+   |                     | dedup  | re-elec| NIC  |
+   | Audio dropout       | None   | Yes    | Brief|
+   | Extra hardware      | 2nd    | Redund.| 2nd  |
+   |                     | NIC    | switch | NIC  |
+   +---------------------+--------+--------+------+
+
+   Table X.1-1: Failover Comparison
+
+
+24.  Network Capability Probing
+
+   On startup, before entering the DISCOVER
+   state, a node MAY characterize its network
+   environment to determine the maximum safe
+   packet rate and optimal default interval.
+
+24.1.  Probe Sequence
+
+   The probe consists of three phases, each
+   using the PING/PONG mechanism defined in
+   Section 13.
+
+   Phase 1 - Coarse Jitter Measurement:
+
+      The node sends 10 PING packets at 1 ms
+      intervals to the discovery multicast
+      address.  Any node that has been on the
+      network for more than 5 seconds MUST
+      respond with PONG.
+
+      From the PONG responses, the probing
+      node computes:
+
+         jitter_coarse = stddev(RTT) / 2
+
+      If no PONG is received, the node is
+      alone on the network and skips further
+      probing.
+
+   Phase 2 - Fine Jitter Measurement:
+
+      The node sends 10 PING packets at 100 us
+      intervals.  From the PONG responses:
+
+         jitter_fine = stddev(RTT) / 2
+
+   Phase 3 - Bandwidth Probing:
+
+      The node sends bursts of 10 back-to-back
+      PING packets (no inter-packet gap) and
+      measures loss.  It repeats with increasing
+      burst size (10, 20, 50, 100 packets)
+      until loss is detected.
+
+         loss_threshold = burst_size at which
+            loss_ratio > 0
+
+24.2.  NETWORK_QUALITY Score
+
+   The probing node computes a composite score:
+
+      Q = 100
+      Q -= min(jitter_coarse / 10, 30)
+      Q -= min(jitter_fine * 10, 30)
+      Q -= min((100 - loss_threshold), 40)
+
+   Where jitter values are in microseconds and
+   loss_threshold is the burst size at first
+   loss.
+
+   Score interpretation:
+
+   +----------+---------+-----------------+
+   | Score    | Quality | Recommended     |
+   |          |         | min interval    |
+   +----------+---------+-----------------+
+   | 90-100   | Optimal | 31.25 us        |
+   | 70-89    | Good    | 125 us          |
+   | 50-69    | Fair    | 500 us          |
+   | 30-49    | Poor    | 1000 us         |
+   |  0-29    | Bad     | 2000 us         |
+   +----------+---------+-----------------+
+
+   Table X.2-1: Network Quality Scores
+
+24.3.  MAX_SAFE_INTERVAL
+
+   Based on the NETWORK_QUALITY score, the
+   node computes a MAX_SAFE_INTERVAL:
+
+      if Q >= 90: MAX_SAFE_INTERVAL = 31.25 us
+      if Q >= 70: MAX_SAFE_INTERVAL = 125 us
+      if Q >= 50: MAX_SAFE_INTERVAL = 500 us
+      if Q >= 30: MAX_SAFE_INTERVAL = 1000 us
+      else:       MAX_SAFE_INTERVAL = 2000 us
+
+   The adaptive algorithm (Section 10B) MUST
+   NOT reduce the packet interval below
+   MAX_SAFE_INTERVAL.
+
+24.4.  Beacon Advertisement
+
+   The NETWORK_QUALITY score and
+   MAX_SAFE_INTERVAL are advertised in the
+   beacon.  Two new fields are appended after
+   the existing Node Name field:
+
+   ABNF:
+
+   beacon-ext = network-quality
+                max-safe-interval
+
+   network-quality    = OCTET
+                        ; 0..100
+   max-safe-interval  = 2OCTET
+                        ; big-endian, us
+
+   Nodes that do not perform probing MUST set
+   network-quality to 0xFF (unknown) and
+   max-safe-interval to 1000 (default).
+
+   These fields are present only when the
+   beacon payload length exceeds the base
+   beacon size.  Receivers MUST check the
+   payload length before reading these fields
+   to maintain backward compatibility.
+
+24.5.  Probe Packet Format
+
+   Probes reuse the existing PING packet format
+   (Section 13.1, Type 0x40) with an additional
+   flag:
+
+      Bit 1 (0x4000) of the common header
+      Flags field: PROBE.  Set to 1 for probe
+      PINGs.  Set to 0 for normal PINGs.
+
+   A node receiving a PING with the PROBE flag
+   MUST respond with PONG immediately,
+   bypassing any normal rate-limiting on PONG
+   responses.
+
+   Probe PINGs MUST NOT be transmitted after
+   the initial startup probe sequence.  A node
+   that has been in DISCOVER or later states
+   for more than 5 seconds MUST NOT send probe
+   PINGs.
+
+
+Appendix F.  Latency Comparison with AES67
+             and Dante
+
+F.1.  Methodology
+
+   The latency figures in this appendix are
+   derived from analytical calculation based on
+   protocol specifications and measured hardware
+   characteristics.  All figures assume:
+
+   -  IEEE 802.3 100BASE-TX or 1000BASE-T
+      Ethernet.
+   -  Cut-through switching (not store-and-
+      forward) where noted.
+   -  5-meter copper patch cables.
+   -  Single switch hop unless noted.
+   -  48 kHz sample rate, 32-bit depth.
+
+F.2.  Component Latency Definitions
+
+   T_pac:   Packetization delay.  Time to
+            accumulate N samples.
+            = N / Fs
+
+   T_ser:   Serialization delay.  Time to
+            transmit one frame on the wire.
+            = frame_bytes * 8 / link_speed
+
+   T_sw:    Switch fabric delay.
+            Cut-through: ~2 us.
+            Store-and-forward: T_ser + ~2 us.
+
+   T_prop:  Propagation delay.
+            = cable_length / (2/3 * c)
+            = 5 m / 2e8 = 0.025 us
+
+   T_dma:   DMA transfer from NIC to memory.
+            ~3-5 us typical.
+
+   T_buf:   Playout buffer depth.
+            = B_samples / Fs
+
+F.3.  AudioBus Latency Calculations
+
+   Ultra-low (single-sample, Section 10A):
+
+      T_pac = 1 / 48000 = 20.83 us
+      T_ser = 64 * 8 / 100e6 = 5.12 us
+      T_sw  = 2 us (cut-through)
+      T_prop= 2 * 0.025 = 0.05 us
+      T_dma = 2 * 5 = 10 us
+      T_decode = 1 us
+      ---
+      Subtotal = 39.0 us
+      Rounded:   42 us (with margin)
+
+      With 50 us playout buffer:  92 us.
+
+   Low-latency (125 us interval):
+
+      T_pac = 6 / 48000 = 125 us
+      T_ser = 68 * 8 / 100e6 = 5.4 us
+      T_sw  = 2 us
+      T_prop= 0.05 us
+      T_dma = 10 us
+      ---
+      Subtotal = 142.5 us
+
+      With 125 us playout buffer: ~268 us.
+      Rounded typical: 125 us network +
+        125 us buffer = 250 us.
+
+   Default (1000 us interval):
+
+      T_pac = 48 / 48000 = 1000 us
+      T_ser = 218 * 8 / 100e6 = 17.4 us
+        (2ch 32-bit: 14+12+20+8+4 = 58 B;
+         but 48 smp*2ch*4B = 384 + 46 = 430 B
+         rounded: ~432 B)
+      T_sw  = 2 us
+      T_prop= 0.05 us
+      T_dma = 10 us
+      ---
+      Subtotal = ~1030 us
+
+      With 2000 us playout buffer: ~3030 us.
+      Rounded: 3 ms.
+
+F.4.  AES67 Latency Calculations
+
+   AES67 minimum (per AES67-2018 Section 8):
+
+      Minimum packet time: 1000 us (48 smp)
+      UDP/IP header: 28 octets additional
+      RTP header: 12 octets additional
+      Total overhead: 40 octets beyond L2
+
+      T_pac = 1000 us
+      T_ser: larger frame due to IP/UDP/RTP
+      T_sw  = 10 us (store-and-forward
+              required for L3 routing)
+      ---
+      Minimum achievable: ~1000 us
+
+   Default (AES67):
+
+      Typical packet time: 4000 us (192 smp)
+      With recommended playout: ~4000 us.
+
+F.5.  Dante Latency Calculations
+
+   Dante minimum (Ultimo/Brooklyn, per
+   Audinate published specifications):
+
+      Minimum setting: 150 us (device-
+      dependent, requires Ultimo chipset).
+
+   Dante typical:
+
+      Low-latency setting: 250 us
+      Default setting: 1000 us
+
+F.6.  Comprehensive Comparison Table
+
+   +-------------------+--------+-------+-------+
+   | Scenario          |AudioBus| AES67 | Dante |
+   +-------------------+--------+-------+-------+
+   | Min possible      | 42 us  |1000 us| 150 us|
+   | Min with buffer   | 92 us  |1000 us| 250 us|
+   | Typical low-lat   | 250 us |1000 us| 500 us|
+   | Default           | 3 ms   | 4 ms  | 1 ms  |
+   | Discovery time    | <200ms | 300 s |3-10 s |
+   | Channel change    | 0 ms   |restart| ~100ms|
+   | Failover          | 0 ms   |net-dep| ~5 ms |
+   +-------------------+--------+-------+-------+
+
+   Table F-1: Comprehensive Latency Comparison
+
+F.7.  Maximum Channel Capacity (100 Mbps)
+
+   Available bandwidth at 80% utilization:
+   80 Mbps.
+
+   AudioBus (1000 us interval, 32-bit):
+
+      Per-channel BW = 32 * 48000
+                     = 1,536,000 bps
+      Overhead per stream = (48000/48)*46*8
+                          = 368,000 bps
+      64-ch stream = 64*1.536 + 0.368 Mbps
+                   = 98.672 Mbps
+
+      This exceeds 80 Mbps.  At 24-bit depth:
+      64-ch = 64*24*48000 + 368000
+            = 73.728 + 0.368 = 74.096 Mbps
+
+      At 32-bit, max channels on 100 Mbps:
+      N = floor((80e6 - 368000)
+          / (32 * 48000))
+        = floor(79632000 / 1536000)
+        = 51 channels
+
+      At 24-bit:
+      N = floor(79632000 / (24 * 48000))
+        = floor(79632000 / 1152000)
+        = 69 channels (capped at 64)
+
+   AES67 (1000 us, 24-bit, L24 encoding):
+
+      Per-channel BW = 24 * 48000
+                     = 1,152,000 bps
+      RTP/UDP/IP overhead per packet:
+        12(RTP) + 8(UDP) + 20(IP) + 14(Eth)
+        = 54 octets
+      Overhead = (48000/48) * 54 * 8
+               = 432,000 bps
+      Max channels:
+      N = floor((80e6 - 432000) / 1152000)
+        = 69 (capped at spec max)
+      Practical AES67 limit: ~48 channels
+      per stream per common implementations.
+
+   Dante (1000 us, 32-bit):
+
+      Similar to AudioBus but with additional
+      UDP/IP overhead.  Practical limit:
+      64 channels at 48 kHz per published
+      specifications.
+
+   +--------------------+---------+------+------+
+   | Config             |AudioBus |AES67 |Dante |
+   +--------------------+---------+------+------+
+   | 48k/32-bit/100Mbps |  51 ch  | N/A  |64 ch |
+   | 48k/24-bit/100Mbps |  64 ch  |48 ch |64 ch |
+   | 48k/16-bit/100Mbps |  64 ch  |64 ch |64 ch |
+   | 96k/24-bit/100Mbps |  34 ch  |24 ch |32 ch |
+   +--------------------+---------+------+------+
+
+   Table F-2: Channel Capacity at 100 Mbps
+
+   Note: AudioBus 32-bit capacity at 100 Mbps
+   is 51 channels (not 64) because the L2
+   overhead per packet, while smaller than
+   L3, is amortized over fewer payload bytes
+   in 32-bit mode.  On Gigabit Ethernet, 64
+   channels of 32-bit audio at 96 kHz consume
+   approximately 148 Mbps, well within the
+   800 Mbps usable budget.
+
+F.8.  Why Layer 2 Is Faster than Layer 3
+
+   AudioBus operates at Layer 2 (Ethernet
+   frames with a dedicated EtherType).  AES67
+   and Dante operate at Layer 3 (IP/UDP).
+
+   Layer 2 advantages:
+
+   1.  No IP header (20 B) or UDP header (8 B).
+       This saves 28 octets per packet,
+       reducing serialization delay.
+
+   2.  No IP routing table lookup at each hop.
+       L2 switches forward based on MAC address
+       table (CAM), which is a single-cycle
+       hardware operation.
+
+   3.  Cut-through switching is possible at L2.
+       L3 routers MUST receive the full IP
+       header before making a forwarding
+       decision.  L2 switches MAY begin
+       forwarding after receiving only the
+       destination MAC (6 octets, 0.48 us
+       at 100 Mbps).
+
+   4.  No fragmentation.  IP packets may be
+       fragmented by intermediate routers,
+       adding reassembly delay.  L2 frames
+       are never fragmented.
+
+   5.  No ARP resolution.  IP multicast
+       requires IGMP group management.  L2
+       multicast requires only MAC address
+       filtering, which is handled in hardware
+       by all commodity switches.
+
+   6.  No TTL decrement or header checksum
+       recomputation at each hop.
+
+   The cumulative effect is 2-10 us lower
+   per-hop latency for L2 versus L3 transport,
+   which compounds across multiple switch hops
+   and is significant for ultra-low latency
+   applications.
+
 ```
