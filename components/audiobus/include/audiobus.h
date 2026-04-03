@@ -223,6 +223,36 @@ typedef struct {
 
 esp_err_t abus_get_stats(abus_handle_t handle, abus_stats_t *out_stats);
 
+/**
+ * Per-node latency measurement (bus mode).
+ * Master measures round-trip to each node using frame timestamps.
+ */
+typedef struct {
+    uint8_t  node_id;
+    uint8_t  hop_count;             /* Number of link hops to this node */
+    int32_t  roundtrip_us;          /* Round-trip latency in µs (master↔node↔master) */
+    int32_t  oneway_us;             /* Estimated one-way latency (roundtrip / 2) */
+    int32_t  jitter_us;             /* Peak-to-peak jitter over last 256 frames */
+    int32_t  jitter_rms_us;         /* RMS jitter (√ of variance) */
+    int32_t  min_roundtrip_us;      /* Minimum observed roundtrip */
+    int32_t  max_roundtrip_us;      /* Maximum observed roundtrip */
+    uint32_t measurement_count;     /* Number of measurements taken */
+} abus_latency_t;
+
+/**
+ * Get latency measurement for a specific node (master only).
+ * The master continuously measures roundtrip time by embedding a timestamp
+ * in each downstream frame and reading the echo in the upstream response.
+ */
+esp_err_t abus_get_latency(abus_handle_t handle, uint8_t node_id,
+                            abus_latency_t *out);
+
+/**
+ * Get latency for all discovered nodes at once.
+ * @return Number of entries written to out array.
+ */
+int abus_get_all_latencies(abus_handle_t handle, abus_latency_t *out, int max_nodes);
+
 #ifdef __cplusplus
 }
 #endif

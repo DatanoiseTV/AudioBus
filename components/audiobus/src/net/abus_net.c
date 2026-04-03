@@ -91,6 +91,17 @@ typedef struct {
 
     /* Packet timer */
     esp_timer_handle_t  tx_timer;
+
+    /* Jitter measurement (listener only, RFC 3550 style) */
+    int64_t             last_arrival_ns;        /* PTP time of last packet arrival */
+    int64_t             last_expected_ns;       /* Expected arrival based on interval */
+    int64_t             jitter_acc;             /* Running jitter accumulator (EMA) */
+    int32_t             jitter_peak_ns;
+    int32_t             jitter_min_ns;
+    int32_t             jitter_max_ns;
+    uint32_t            packets_received;
+    uint32_t            packets_lost;
+    uint32_t            packets_late;
 } local_stream_t;
 
 /* ---------------------------------------------------------------------------
@@ -137,6 +148,16 @@ struct abus_net_handle {
     uint16_t gpio_in[ABUS_NET_MAX_NODES];    /* What we received from each node */
     uint32_t gpio_uid_map[ABUS_NET_MAX_NODES]; /* UID → index mapping */
     uint8_t  gpio_node_count;
+
+    /* Ping/pong state */
+    SemaphoreHandle_t   ping_sem;               /* Signaled when pong arrives */
+    uint32_t            ping_target_uid;
+    int64_t             ping_send_time;
+    int64_t             ping_roundtrip_ns;
+
+    /* Per-node latency cache */
+    abus_net_node_latency_t node_latency[ABUS_NET_MAX_NODES];
+    uint8_t             node_latency_count;
 
     /* Packet sequence counter */
     uint16_t            pkt_seq;
@@ -310,13 +331,43 @@ static void process_audio_packet(struct abus_net_handle *h,
     if (!s) return;
 
     h->stats.audio_pkts_rx++;
+    s->packets_received++;
 
-    /* Sequence check */
+    /* Sequence check — detect lost packets */
     uint16_t expected_seq = s->seq + 1;
     if (hdr->seq != expected_seq && s->seq != 0) {
-        h->stats.seq_errors++;
+        uint16_t gap = hdr->seq - expected_seq;
+        h->stats.seq_errors += gap;
+        s->packets_lost += gap;
     }
     s->seq = hdr->seq;
+
+    /* Jitter measurement (RFC 3550 interarrival jitter):
+     * J(i) = J(i-1) + (|D(i)| - J(i-1)) / 16
+     * where D(i) = (arrival_i - arrival_(i-1)) - (send_i - send_(i-1)) */
+    int64_t now_ns = abus_ptp_get_time(h->ptp);
+    if (s->last_arrival_ns > 0) {
+        int64_t actual_interval = now_ns - s->last_arrival_ns;
+        int64_t expected_interval = (int64_t)s->info.packet_interval_us * 1000;
+        int64_t deviation = actual_interval - expected_interval;
+        int64_t abs_dev = (deviation < 0) ? -deviation : deviation;
+
+        /* EMA jitter filter (RFC 3550: factor of 1/16) */
+        s->jitter_acc += (abs_dev - s->jitter_acc) / 16;
+
+        /* Track peak/min/max */
+        int32_t dev32 = (int32_t)(abs_dev > INT32_MAX ? INT32_MAX : abs_dev);
+        if (dev32 > s->jitter_peak_ns) s->jitter_peak_ns = dev32;
+        if (s->jitter_min_ns == 0 || dev32 < s->jitter_min_ns) s->jitter_min_ns = dev32;
+        if (dev32 > s->jitter_max_ns) s->jitter_max_ns = dev32;
+    }
+    s->last_arrival_ns = now_ns;
+
+    /* Late packet detection */
+    if (ap->presentation_ts > 0 && now_ns > ap->presentation_ts) {
+        s->packets_late++;
+        h->stats.late_packets++;
+    }
 
     /* Unpack audio into ring buffer */
     uint8_t bps = ap->bit_depth / 8;
@@ -555,6 +606,23 @@ static void rx_task(void *arg) {
                 /* TODO: process stream announcement, update remote_streams */
                 break;
 
+            case ABUS_NET_PKT_PING: {
+                /* Echo back immediately as PONG with same payload (timestamp) */
+                uint8_t pong_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+                send_raw_frame(h, pong_mac, ABUS_NET_PKT_PONG, payload, payload_len);
+                break;
+            }
+
+            case ABUS_NET_PKT_PONG: {
+                /* Response to our ping — measure roundtrip */
+                if (hdr->source_uid == h->ping_target_uid && payload_len >= 8) {
+                    int64_t now = esp_timer_get_time() * 1000;  /* ns */
+                    h->ping_roundtrip_ns = now - h->ping_send_time;
+                    xSemaphoreGive(h->ping_sem);
+                }
+                break;
+            }
+
             default:
                 break;
         }
@@ -682,6 +750,7 @@ esp_err_t abus_net_init(const abus_net_config_t *config, abus_net_handle_t *out)
 
     h->stream_lock = xSemaphoreCreateMutex();
     h->node_lock = xSemaphoreCreateMutex();
+    h->ping_sem = xSemaphoreCreateBinary();
     h->rx_queue = xQueueCreate(64, sizeof(rx_msg_t *));
 
     /* Create PTP engine */
@@ -1125,4 +1194,199 @@ esp_err_t abus_net_get_stats(abus_net_handle_t h, abus_net_stats_t *out) {
     out->ptp_offset_ns = ptp.offset_ns;
     out->ptp_path_delay_ns = ptp.path_delay_ns;
     return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Public API: Per-stream latency and jitter
+ * --------------------------------------------------------------------------- */
+
+esp_err_t abus_net_get_stream_latency(abus_net_handle_t h, uint16_t stream_id,
+                                       abus_net_stream_latency_t *out) {
+    if (!h || !out) return ESP_ERR_INVALID_ARG;
+
+    xSemaphoreTake(h->stream_lock, portMAX_DELAY);
+    for (int i = 0; i < h->num_streams; i++) {
+        local_stream_t *s = &h->streams[i];
+        if (s->info.stream_id == stream_id && !s->is_talker && s->info.active) {
+            memset(out, 0, sizeof(*out));
+            out->stream_id = s->info.stream_id;
+            out->talker_uid = s->info.talker_uid;
+
+            /* Jitter from EMA accumulator */
+            out->jitter_rms_ns = (int32_t)s->jitter_acc;
+            out->jitter_peak_ns = s->jitter_peak_ns;
+            out->jitter_min_ns = s->jitter_min_ns;
+            out->jitter_max_ns = s->jitter_max_ns;
+
+            /* Packet stats */
+            out->packets_received = s->packets_received;
+            out->packets_lost = s->packets_lost;
+            out->packets_late = s->packets_late;
+            out->loss_ratio = (s->packets_received + s->packets_lost > 0) ?
+                (float)s->packets_lost / (s->packets_received + s->packets_lost) : 0.0f;
+
+            /* Timing */
+            out->last_arrival_ns = s->last_arrival_ns;
+            out->last_presentation_ns = s->next_playout_ts;
+            out->measurement_count = s->packets_received;
+
+            /* Network latency (from PTP) */
+            abus_net_ptp_state_t ptp;
+            abus_ptp_get_state(h->ptp, &ptp);
+            out->network_latency_us = (int32_t)(ptp.path_delay_ns / 1000);
+
+            /* Buffer depth: difference between last presentation ts and current PTP time */
+            if (s->next_playout_ts > 0) {
+                int64_t now = abus_ptp_get_time(h->ptp);
+                out->buffer_depth_us = (int32_t)((s->next_playout_ts - now) / 1000);
+            }
+
+            /* Total latency: packet interval + network delay + buffer */
+            out->total_latency_us = (int32_t)s->info.packet_interval_us +
+                                    out->network_latency_us +
+                                    h->config.presentation_latency_us;
+
+            xSemaphoreGive(h->stream_lock);
+            return ESP_OK;
+        }
+    }
+    xSemaphoreGive(h->stream_lock);
+    return ESP_ERR_NOT_FOUND;
+}
+
+int abus_net_get_all_stream_latencies(abus_net_handle_t h,
+                                       abus_net_stream_latency_t *out, int max) {
+    if (!h || !out) return 0;
+    int count = 0;
+    xSemaphoreTake(h->stream_lock, portMAX_DELAY);
+    for (int i = 0; i < h->num_streams && count < max; i++) {
+        if (!h->streams[i].is_talker && h->streams[i].info.active) {
+            xSemaphoreGive(h->stream_lock);
+            abus_net_get_stream_latency(h, h->streams[i].info.stream_id, &out[count]);
+            count++;
+            xSemaphoreTake(h->stream_lock, portMAX_DELAY);
+        }
+    }
+    xSemaphoreGive(h->stream_lock);
+    return count;
+}
+
+/* ---------------------------------------------------------------------------
+ * Public API: Per-node ping / roundtrip measurement
+ * --------------------------------------------------------------------------- */
+
+esp_err_t abus_net_ping(abus_net_handle_t h, uint32_t node_uid,
+                         uint32_t timeout_ms, abus_net_node_latency_t *out) {
+    if (!h || !out) return ESP_ERR_INVALID_ARG;
+
+    /* If timeout_ms == 0, return cached measurement */
+    if (timeout_ms == 0) {
+        return abus_net_get_node_latency(h, node_uid, out);
+    }
+
+    /* Send ping with our current timestamp */
+    h->ping_target_uid = node_uid;
+    h->ping_send_time = esp_timer_get_time() * 1000;  /* ns */
+    h->ping_roundtrip_ns = -1;
+
+    /* Reset semaphore */
+    xSemaphoreTake(h->ping_sem, 0);
+
+    /* Send ping (timestamp as payload) */
+    int64_t ts = h->ping_send_time;
+    uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+    esp_err_t ret = send_raw_frame(h, disc_mac, ABUS_NET_PKT_PING,
+                                    (uint8_t *)&ts, sizeof(ts));
+    if (ret != ESP_OK) return ret;
+
+    /* Wait for pong */
+    if (xSemaphoreTake(h->ping_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        /* Timeout — update cache */
+        for (int i = 0; i < h->node_latency_count; i++) {
+            if (h->node_latency[i].node_uid == node_uid) {
+                h->node_latency[i].ping_timeouts++;
+                break;
+            }
+        }
+        return ESP_ERR_TIMEOUT;
+    }
+
+    int32_t rtt_us = (int32_t)(h->ping_roundtrip_ns / 1000);
+
+    /* Update latency cache */
+    abus_net_node_latency_t *cached = NULL;
+    for (int i = 0; i < h->node_latency_count; i++) {
+        if (h->node_latency[i].node_uid == node_uid) {
+            cached = &h->node_latency[i];
+            break;
+        }
+    }
+    if (!cached && h->node_latency_count < ABUS_NET_MAX_NODES) {
+        cached = &h->node_latency[h->node_latency_count++];
+        memset(cached, 0, sizeof(*cached));
+        cached->node_uid = node_uid;
+        cached->roundtrip_min_us = INT32_MAX;
+
+        /* Copy name from node table */
+        xSemaphoreTake(h->node_lock, portMAX_DELAY);
+        for (int i = 0; i < h->num_nodes; i++) {
+            if (h->nodes[i].uid == node_uid) {
+                strncpy(cached->node_name, h->nodes[i].name, 31);
+                break;
+            }
+        }
+        xSemaphoreGive(h->node_lock);
+    }
+
+    if (cached) {
+        cached->roundtrip_us = rtt_us;
+        cached->oneway_us = rtt_us / 2;
+        cached->ping_count++;
+
+        if (rtt_us < cached->roundtrip_min_us) cached->roundtrip_min_us = rtt_us;
+        if (rtt_us > cached->roundtrip_max_us) cached->roundtrip_max_us = rtt_us;
+
+        /* EMA for average */
+        if (cached->roundtrip_avg_us == 0) {
+            cached->roundtrip_avg_us = rtt_us;
+        } else {
+            cached->roundtrip_avg_us = cached->roundtrip_avg_us +
+                                       (rtt_us - cached->roundtrip_avg_us) / 8;
+        }
+
+        /* Jitter: deviation from average */
+        int32_t dev = rtt_us - cached->roundtrip_avg_us;
+        if (dev < 0) dev = -dev;
+        cached->roundtrip_jitter_us = cached->roundtrip_jitter_us +
+                                      (dev - cached->roundtrip_jitter_us) / 8;
+
+        /* PTP-derived one-way (more accurate) */
+        abus_net_ptp_state_t ptp;
+        abus_ptp_get_state(h->ptp, &ptp);
+        cached->ptp_oneway_ns = (int32_t)ptp.path_delay_ns;
+
+        *out = *cached;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t abus_net_get_node_latency(abus_net_handle_t h, uint32_t node_uid,
+                                     abus_net_node_latency_t *out) {
+    if (!h || !out) return ESP_ERR_INVALID_ARG;
+    for (int i = 0; i < h->node_latency_count; i++) {
+        if (h->node_latency[i].node_uid == node_uid) {
+            *out = h->node_latency[i];
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+int abus_net_get_all_node_latencies(abus_net_handle_t h,
+                                     abus_net_node_latency_t *out, int max) {
+    if (!h || !out) return 0;
+    int n = (h->node_latency_count < max) ? h->node_latency_count : max;
+    memcpy(out, h->node_latency, n * sizeof(abus_net_node_latency_t));
+    return n;
 }

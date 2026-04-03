@@ -83,6 +83,8 @@ typedef enum {
     ABUS_NET_PKT_PTP_DELAY_RESP = 0x13, /* PTP Delay_Resp */
     ABUS_NET_PKT_TUNNEL     = 0x20,     /* SPI/I2C/GPIO/MIDI tunnel */
     ABUS_NET_PKT_METADATA   = 0x30,     /* Stream metadata (names, labels, etc.) */
+    ABUS_NET_PKT_PING       = 0x40,     /* Latency probe (request) */
+    ABUS_NET_PKT_PONG       = 0x41,     /* Latency probe (response, echoes timestamp) */
 } abus_net_pkt_type_t;
 
 /* ---------------------------------------------------------------------------
@@ -494,6 +496,7 @@ int abus_net_get_nodes(abus_net_handle_t h, abus_net_node_t *out, int max_nodes)
 int abus_net_get_streams(abus_net_handle_t h, abus_net_stream_t *out, int max_streams);
 
 typedef struct {
+    /* Packet counters */
     uint32_t    pkts_tx;
     uint32_t    pkts_rx;
     uint32_t    audio_pkts_tx;
@@ -501,12 +504,122 @@ typedef struct {
     uint32_t    ptp_syncs;
     uint32_t    seq_errors;         /* Out-of-order or missing packets */
     uint32_t    late_packets;       /* Arrived after presentation time */
-    int64_t     ptp_offset_ns;      /* Current PTP offset from grandmaster */
-    int64_t     ptp_path_delay_ns;
-    uint32_t    jitter_ns;          /* Measured packet arrival jitter (RMS) */
+
+    /* PTP clock state */
+    int64_t     ptp_offset_ns;      /* Current offset from grandmaster */
+    int64_t     ptp_path_delay_ns;  /* One-way delay to grandmaster */
+
+    /* Global jitter (across all streams, RMS of packet inter-arrival) */
+    uint32_t    jitter_rms_ns;
+    uint32_t    jitter_peak_ns;     /* Peak-to-peak over measurement window */
 } abus_net_stats_t;
 
 esp_err_t abus_net_get_stats(abus_net_handle_t h, abus_net_stats_t *out);
+
+/* ---------------------------------------------------------------------------
+ * Per-stream latency and jitter measurement
+ * --------------------------------------------------------------------------- */
+
+typedef struct {
+    uint16_t    stream_id;
+    uint32_t    talker_uid;
+
+    /* End-to-end latency: time from talker write to listener read.
+     * Includes: packet interval + network delay + playout buffer. */
+    int32_t     total_latency_us;
+
+    /* Network latency only (PTP path delay to talker). */
+    int32_t     network_latency_us;
+
+    /* Presentation buffer depth: how far ahead of playout the buffer is. */
+    int32_t     buffer_depth_us;
+
+    /* Packet inter-arrival jitter (RFC 3550 style).
+     * Measures the deviation of actual arrival time from expected arrival. */
+    int32_t     jitter_rms_ns;      /* RMS jitter */
+    int32_t     jitter_peak_ns;     /* Peak-to-peak jitter */
+    int32_t     jitter_min_ns;      /* Minimum inter-arrival deviation */
+    int32_t     jitter_max_ns;      /* Maximum inter-arrival deviation */
+
+    /* Packet loss */
+    uint32_t    packets_received;
+    uint32_t    packets_lost;       /* Based on sequence number gaps */
+    uint32_t    packets_late;       /* Arrived after presentation time */
+    float       loss_ratio;         /* 0.0 - 1.0 */
+
+    /* Timing */
+    int64_t     last_arrival_ns;    /* PTP timestamp of last received packet */
+    int64_t     last_presentation_ns; /* Presentation timestamp of last packet */
+    uint32_t    measurement_count;
+} abus_net_stream_latency_t;
+
+/**
+ * Get latency/jitter measurement for a specific subscribed stream.
+ * Only valid for streams this node is listening to.
+ */
+esp_err_t abus_net_get_stream_latency(abus_net_handle_t h, uint16_t stream_id,
+                                       abus_net_stream_latency_t *out);
+
+/**
+ * Get latency for all subscribed streams at once.
+ * @return Number of entries written.
+ */
+int abus_net_get_all_stream_latencies(abus_net_handle_t h,
+                                       abus_net_stream_latency_t *out, int max);
+
+/* ---------------------------------------------------------------------------
+ * Per-node roundtrip measurement (active ping)
+ * --------------------------------------------------------------------------- */
+
+typedef struct {
+    uint32_t    node_uid;
+    char        node_name[32];
+
+    /* Roundtrip: measured by sending a timestamped probe and timing the response. */
+    int32_t     roundtrip_us;       /* Last measured roundtrip */
+    int32_t     roundtrip_min_us;
+    int32_t     roundtrip_max_us;
+    int32_t     roundtrip_avg_us;   /* Exponential moving average */
+
+    /* One-way estimate (roundtrip / 2, assuming symmetric path). */
+    int32_t     oneway_us;
+
+    /* PTP-derived (more accurate than ping if both nodes are PTP-synced):
+     * Uses the PTP offset + path delay to compute true one-way latency. */
+    int32_t     ptp_oneway_ns;
+
+    /* Jitter of the roundtrip measurement itself. */
+    int32_t     roundtrip_jitter_us;
+
+    uint32_t    ping_count;
+    uint32_t    ping_timeouts;
+} abus_net_node_latency_t;
+
+/**
+ * Ping a specific node and measure roundtrip time.
+ * Sends a timestamped probe packet; the remote node echoes it back.
+ * This is a blocking call — waits up to timeout_ms for the response.
+ *
+ * @param node_uid    Target node
+ * @param timeout_ms  Maximum wait time (0 = use last cached measurement)
+ * @param out         Measurement result
+ */
+esp_err_t abus_net_ping(abus_net_handle_t h, uint32_t node_uid,
+                         uint32_t timeout_ms, abus_net_node_latency_t *out);
+
+/**
+ * Get cached latency measurement for a node (from background pings or PTP).
+ * Non-blocking — returns the last known measurement without sending a probe.
+ */
+esp_err_t abus_net_get_node_latency(abus_net_handle_t h, uint32_t node_uid,
+                                     abus_net_node_latency_t *out);
+
+/**
+ * Get latency measurements for all known nodes.
+ * @return Number of entries written.
+ */
+int abus_net_get_all_node_latencies(abus_net_handle_t h,
+                                     abus_net_node_latency_t *out, int max);
 
 #ifdef __cplusplus
 }
