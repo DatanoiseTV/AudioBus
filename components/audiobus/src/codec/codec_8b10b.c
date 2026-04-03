@@ -110,7 +110,8 @@ typedef struct {
 static const k_char_entry_t k_chars[] = {
     { K28_5, 0x17C, 0x283 },   /* K28.5 — comma character (alignment) */
     { K28_1, 0x1FC, 0x203 },   /* K28.1 — SOF */
-    { K28_3, 0x17C, 0x283 },   /* K28.3 — idle (same as K28.5 with different context) */
+    /* FIX #16: K28.3 has different 3b/4b encoding than K28.5 */
+    { K28_3, 0x1FC, 0x203 },   /* K28.3 — idle (5b/6b same as K28.x, 3b/4b = .3) */
     { K27_7, 0x37B, 0x084 },   /* K27.7 — direction turnaround */
     { K29_7, 0x37E, 0x081 },   /* K29.7 — EOF */
     { K23_7, 0x37A, 0x085 },   /* K23.7 — discovery beacon */

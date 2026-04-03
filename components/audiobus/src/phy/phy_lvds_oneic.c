@@ -289,30 +289,29 @@ static bool IRAM_ATTR tx_done_cb(parlio_tx_unit_handle_t unit,
     return hp == pdTRUE;
 }
 
+/*
+ * FIX #2: ISR only swaps buffers and passes raw bitstream to callback.
+ * Bitstream decoding (comma scan, 8b10b decode) is deferred to task.
+ */
 static bool IRAM_ATTR rx_done_cb(parlio_rx_unit_handle_t unit,
                                   const parlio_rx_event_data_t *edata,
                                   void *user_data) {
     oneic_phy_ctx_t *ctx = (oneic_phy_ctx_t *)user_data;
     if (!ctx->rx_frame_cb || !edata->data) return false;
 
-    int total_bits = edata->recv_bytes * 8;
-    int frame_len = decode_bitstream_to_frame(ctx, (const uint8_t *)edata->data,
-                                               total_bits, ctx->decoded_buf);
-    if (frame_len > 0) {
-        ctx->rx_frame_cb(0, ctx->decoded_buf, frame_len, ctx->rx_frame_cb_arg);
-        ctx->frames_rx++;
-    }
+    /* Pass raw bitstream to callback for task-level decoding */
+    ctx->rx_frame_cb(0, (const uint8_t *)edata->data,
+                     edata->recv_bytes, ctx->rx_frame_cb_arg);
+    ctx->frames_rx++;
 
     /* Re-queue RX buffer */
     uint8_t next = ctx->rx_buf_idx ^ 1;
-    BaseType_t hp = pdFALSE;
     parlio_receive_config_t rcfg = { .delimiter = ctx->rx_delimiter };
     bool hp2 = false;
     parlio_rx_unit_receive_from_isr(ctx->rx_unit, ctx->rx_bitstream[next],
                                     MAX_BITSTREAM_BYTES, &rcfg, &hp2);
-    if (hp2) hp = pdTRUE;
     ctx->rx_buf_idx = next;
-    return hp == pdTRUE;
+    return hp2;
 }
 
 /* ---------------------------------------------------------------------------

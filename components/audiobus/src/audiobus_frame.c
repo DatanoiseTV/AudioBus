@@ -19,12 +19,12 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* CRC-32 (same polynomial as Ethernet) for frame integrity */
+/* CRC-32 (same polynomial as Ethernet) for frame integrity.
+ * FIX #15: Use constructor attribute for thread-safe init at load time. */
 static uint32_t crc32_table[256];
-static bool crc32_initialized = false;
 
+__attribute__((constructor))
 static void crc32_init_table(void) {
-    if (crc32_initialized) return;
     for (uint32_t i = 0; i < 256; i++) {
         uint32_t crc = i;
         for (int j = 0; j < 8; j++) {
@@ -32,11 +32,9 @@ static void crc32_init_table(void) {
         }
         crc32_table[i] = crc;
     }
-    crc32_initialized = true;
 }
 
 uint32_t abus_crc32(const uint8_t *data, int len) {
-    crc32_init_table();
     uint32_t crc = 0xFFFFFFFF;
     for (int i = 0; i < len; i++) {
         crc = crc32_table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
@@ -456,6 +454,9 @@ int abus_frame_unpack(const abus_slotmap_t *slotmap,
         const abus_audio_slot_t *slot = &slotmap->audio_slots[i];
         uint16_t off = slot->byte_offset;
         int32_t sample = 0;
+
+        /* FIX #11: Bounds check slot offset against frame length */
+        if (off + slot->byte_width > frame_len) return -3;
 
         /* Unpack big-endian, sign-extend to 32-bit */
         switch (slot->byte_width) {

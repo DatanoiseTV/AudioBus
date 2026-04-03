@@ -92,8 +92,13 @@ static void ringbuf_free(abus_audio_buffer_t *rb) {
     rb->samples = NULL;
 }
 
+/* FIX #5: Use atomic load/store with acquire/release for multi-core safety.
+ * volatile alone does NOT guarantee memory ordering on ESP32-P4 (RISC-V). */
+
 static inline uint16_t ringbuf_available(const abus_audio_buffer_t *rb) {
-    int diff = (int)rb->write_pos - (int)rb->read_pos;
+    uint16_t wp = __atomic_load_n(&rb->write_pos, __ATOMIC_ACQUIRE);
+    uint16_t rp = __atomic_load_n(&rb->read_pos, __ATOMIC_ACQUIRE);
+    int diff = (int)wp - (int)rp;
     if (diff < 0) diff += rb->num_frames;
     return (uint16_t)diff;
 }
@@ -108,7 +113,8 @@ static int ringbuf_write(abus_audio_buffer_t *rb, const int32_t *samples, int fr
     while (written < frames && ringbuf_space(rb) > 0) {
         uint16_t wp = rb->write_pos;
         memcpy(&rb->samples[wp * nc], &samples[written * nc], nc * sizeof(int32_t));
-        rb->write_pos = (wp + 1) % rb->num_frames;
+        /* Release: ensure memcpy is visible before index update */
+        __atomic_store_n(&rb->write_pos, (wp + 1) % rb->num_frames, __ATOMIC_RELEASE);
         written++;
     }
     return written;
@@ -120,7 +126,7 @@ static int ringbuf_read(abus_audio_buffer_t *rb, int32_t *samples, int frames) {
     while (read_count < frames && ringbuf_available(rb) > 0) {
         uint16_t rp = rb->read_pos;
         memcpy(&samples[read_count * nc], &rb->samples[rp * nc], nc * sizeof(int32_t));
-        rb->read_pos = (rp + 1) % rb->num_frames;
+        __atomic_store_n(&rb->read_pos, (rp + 1) % rb->num_frames, __ATOMIC_RELEASE);
         read_count++;
     }
     return read_count;
@@ -195,36 +201,52 @@ static uint8_t bd_to_flag(abus_bit_depth_t bd) {
 }
 
 /* ---------------------------------------------------------------------------
- * PHY RX callback — called from ISR, pushes frame to processing queue
+ * PHY RX callback — called from ISR context.
+ *
+ * FIX #1: Do NOT call heap_caps_malloc from ISR. Use a pre-allocated
+ * pool of frame buffers. The ISR copies data into the next free slot
+ * and enqueues a lightweight index, not a heap pointer.
  * --------------------------------------------------------------------------- */
+
+#define RX_POOL_COUNT   8
+#define RX_POOL_BUFSZ   ABUS_FRAME_BYTES_MAX
 
 typedef struct {
     uint8_t  port;
     uint16_t len;
-    uint8_t  data[];            /* Flexible array member */
-} rx_frame_msg_t;
+    uint8_t  data[RX_POOL_BUFSZ];
+} rx_frame_slot_t;
+
+/* Pre-allocated pool (initialized in abus_init) */
+static rx_frame_slot_t *rx_pool;
+static volatile uint8_t rx_pool_write;  /* Next slot to write (ISR side) */
+static volatile uint8_t rx_pool_read;   /* Next slot to read (task side) */
 
 static void phy_rx_callback(uint8_t port, const uint8_t *data,
                              uint16_t len, void *arg) {
     struct abus_handle *h = (struct abus_handle *)arg;
-    if (!h || !data || len == 0) return;
+    if (!h || !data || len == 0 || len > RX_POOL_BUFSZ) return;
 
-    /* Allocate message with frame data inline */
-    rx_frame_msg_t *msg = heap_caps_malloc(sizeof(rx_frame_msg_t) + len,
-                                           MALLOC_CAP_INTERNAL);
-    if (!msg) {
+    /* Check if pool has a free slot (lock-free single-producer check) */
+    uint8_t wp = rx_pool_write;
+    uint8_t next = (wp + 1) % RX_POOL_COUNT;
+    if (next == rx_pool_read) {
         h->stats.buffer_overruns++;
-        return;
+        return;  /* Pool full — drop frame */
     }
 
-    msg->port = port;
-    msg->len = len;
-    memcpy(msg->data, data, len);
+    /* Copy into pre-allocated slot (no malloc!) */
+    rx_frame_slot_t *slot = &rx_pool[wp];
+    slot->port = port;
+    slot->len = len;
+    memcpy(slot->data, data, len);
+    __atomic_store_n(&rx_pool_write, next, __ATOMIC_RELEASE);
 
-    if (xQueueSendFromISR(h->rx_queue, &msg, NULL) != pdTRUE) {
-        heap_caps_free(msg);
-        h->stats.buffer_overruns++;
-    }
+    /* Notify the processing task */
+    BaseType_t hp = pdFALSE;
+    uint8_t idx = wp;
+    xQueueSendFromISR(h->rx_queue, &idx, &hp);
+    portYIELD_FROM_ISR(hp);
 }
 
 /* ---------------------------------------------------------------------------
@@ -272,7 +294,7 @@ static void master_frame_cycle(struct abus_handle *h) {
  * Process a received frame (master or slave)
  * --------------------------------------------------------------------------- */
 
-static void process_rx_frame(struct abus_handle *h, const rx_frame_msg_t *msg) {
+static void process_rx_frame(struct abus_handle *h, const rx_frame_slot_t *msg) {
     abus_frame_header_t hdr;
     uint16_t dn_aux_len = 0, up_aux_len = 0;
     uint8_t dn_sideband = 0, up_sideband = 0;
@@ -360,7 +382,7 @@ static void process_rx_frame(struct abus_handle *h, const rx_frame_msg_t *msg) {
 
 static void frame_task(void *arg) {
     struct abus_handle *h = (struct abus_handle *)arg;
-    rx_frame_msg_t *msg;
+    uint8_t slot_idx;
 
     /* Master: kick off the first frame */
     if (h->config.role == ABUS_ROLE_MASTER && h->state == ABUS_STATE_RUNNING) {
@@ -368,15 +390,22 @@ static void frame_task(void *arg) {
     }
 
     while (h->state == ABUS_STATE_RUNNING || h->state == ABUS_STATE_DISCOVERY) {
-        if (xQueueReceive(h->rx_queue, &msg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        /* FIX #1: Receive pool index, not heap pointer */
+        if (xQueueReceive(h->rx_queue, &slot_idx, pdMS_TO_TICKS(100)) == pdTRUE) {
+            rx_frame_slot_t *slot = &rx_pool[slot_idx];
             if (h->state == ABUS_STATE_RUNNING) {
-                process_rx_frame(h, msg);
+                /* Build a temporary msg-like struct on stack for process_rx_frame */
+                rx_frame_slot_t local_copy = *slot;
+                process_rx_frame(h, &local_copy);
             }
-            /* TODO: handle DISCOVERY state frames here */
-            heap_caps_free(msg);
+            /* Release slot back to pool */
+            __atomic_store_n(&rx_pool_read,
+                             (slot_idx + 1) % RX_POOL_COUNT, __ATOMIC_RELEASE);
         }
     }
 
+    /* FIX #17: Signal completion before deleting */
+    xTaskNotifyGive(h->task_handle);
     vTaskDelete(NULL);
 }
 
@@ -427,7 +456,9 @@ esp_err_t abus_init(const abus_config_t *config, abus_handle_t *out_handle) {
     h->dn_aux_scratch = heap_caps_calloc(1, frame_bytes / 2, MALLOC_CAP_INTERNAL);
     h->up_aux_scratch = heap_caps_calloc(1, frame_bytes / 2, MALLOC_CAP_INTERNAL);
 
-    if (!h->frame_buf || !h->dn_audio_scratch || !h->up_audio_scratch) {
+    /* FIX #7: Check ALL scratch buffer allocations */
+    if (!h->frame_buf || !h->dn_audio_scratch || !h->up_audio_scratch ||
+        !h->dn_aux_scratch || !h->up_aux_scratch) {
         ret = ESP_ERR_NO_MEM;
         goto fail;
     }
@@ -435,8 +466,15 @@ esp_err_t abus_init(const abus_config_t *config, abus_handle_t *out_handle) {
     /* Initialize tunnel subsystem */
     abus_tunnel_init(&h->tunnel_ctx);
 
-    /* Create RX processing queue */
-    h->rx_queue = xQueueCreate(8, sizeof(rx_frame_msg_t *));
+    /* FIX #1: Allocate pre-allocated RX frame pool (ISR-safe) */
+    rx_pool = heap_caps_calloc(RX_POOL_COUNT, sizeof(rx_frame_slot_t),
+                               MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!rx_pool) { ret = ESP_ERR_NO_MEM; goto fail; }
+    rx_pool_write = 0;
+    rx_pool_read = 0;
+
+    /* Create RX processing queue (carries pool indices, not pointers) */
+    h->rx_queue = xQueueCreate(RX_POOL_COUNT, sizeof(uint8_t));
 
     /* Initialize audio ring buffers (will be resized after discovery) */
     uint16_t buf_frames = config->audio_buffer_frames ? config->audio_buffer_frames : 8;
@@ -450,12 +488,20 @@ esp_err_t abus_init(const abus_config_t *config, abus_handle_t *out_handle) {
     return ESP_OK;
 
 fail:
+    /* FIX #8: Full cleanup on failure */
     if (h) {
+        if (h->phy.ops && h->phy.ctx) h->phy.ops->deinit(h->phy.ctx);
+        if (h->tunnel_ctx) abus_tunnel_deinit(h->tunnel_ctx);
+        if (h->rx_queue) vQueueDelete(h->rx_queue);
+        ringbuf_free(&h->tx_audio);
+        ringbuf_free(&h->rx_audio);
         heap_caps_free(h->frame_buf);
         heap_caps_free(h->dn_audio_scratch);
         heap_caps_free(h->up_audio_scratch);
         heap_caps_free(h->dn_aux_scratch);
         heap_caps_free(h->up_aux_scratch);
+        heap_caps_free(rx_pool);
+        rx_pool = NULL;
         free(h);
     }
     return ret;
@@ -499,9 +545,9 @@ esp_err_t abus_stop(abus_handle_t handle) {
 
     h->state = ABUS_STATE_RESET;
 
-    /* Wait for task to exit */
+    /* FIX #17: Wait for task to signal completion, not blind delay */
     if (h->task_handle) {
-        vTaskDelay(pdMS_TO_TICKS(200));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         h->task_handle = NULL;
     }
 
@@ -563,10 +609,9 @@ esp_err_t abus_tunnel_send(abus_handle_t handle, uint8_t node_id,
                            const uint8_t *data, uint16_t len) {
     struct abus_handle *h = handle;
     ESP_RETURN_ON_FALSE(h && data, ESP_ERR_INVALID_ARG, TAG, "null arg");
-    /* Delegate to tunnel subsystem — data is queued for next frame */
+    /* FIX #19: Return error until properly implemented */
     (void)node_id; (void)type; (void)len;
-    /* TODO: implement tunnel queue */
-    return ESP_OK;
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 esp_err_t abus_tunnel_register(abus_handle_t handle, abus_tunnel_cb_t cb, void *ctx) {

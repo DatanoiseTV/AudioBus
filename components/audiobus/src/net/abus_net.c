@@ -39,6 +39,7 @@
 #include "esp_heap_caps.h"
 
 #include <string.h>
+#include "lwip/def.h"  /* htons, htonl, ntohs, ntohl */
 
 static const char *TAG = "abus_net";
 
@@ -207,14 +208,14 @@ static esp_err_t send_raw_frame(struct abus_net_handle *h,
     frame[12] = (ABUS_ETH_ETHERTYPE >> 8) & 0xFF;
     frame[13] = ABUS_ETH_ETHERTYPE & 0xFF;
 
-    /* AudioBus header */
+    /* AudioBus header — FIX #10: use network byte order for multi-byte fields */
     abus_net_header_t *hdr = (abus_net_header_t *)(frame + 14);
     hdr->version = 1;
     hdr->pkt_type = pkt_type;
-    hdr->flags = (h->config.dscp & 0x3F) << 4;
-    hdr->source_uid = h->uid;
-    hdr->seq = h->pkt_seq++;
-    hdr->length = payload_len;
+    hdr->flags = htons((h->config.dscp & 0x3F) << 4);
+    hdr->source_uid = htonl(h->uid);
+    hdr->seq = htons(h->pkt_seq++);
+    hdr->length = htons(payload_len);
 
     /* Payload */
     if (payload && payload_len > 0) {
@@ -336,6 +337,12 @@ static void process_audio_packet(struct abus_net_handle *h,
     h->stats.audio_pkts_rx++;
     s->packets_received++;
 
+    /* FIX #21: Validate audio data bounds before processing */
+    uint8_t bps_early = ap->bit_depth / 8;
+    if (bps_early == 0 || bps_early > 4) return;
+    uint32_t expected_audio_bytes = (uint32_t)ap->channels * ap->samples_per_ch * bps_early;
+    if (len < sizeof(abus_net_audio_payload_t) + expected_audio_bytes) return;
+
     /* Sequence check — detect lost packets */
     uint16_t expected_seq = s->seq + 1;
     if (hdr->seq != expected_seq && s->seq != 0) {
@@ -376,6 +383,15 @@ static void process_audio_packet(struct abus_net_handle *h,
     uint8_t bps = ap->bit_depth / 8;
     uint8_t channels = ap->channels;
     uint16_t frames = ap->samples_per_ch;
+
+    /* FIX #22: Check ring buffer space before writing */
+    uint16_t rb_avail = (s->rx_read > s->rx_write) ?
+        (s->rx_read - s->rx_write - 1) :
+        (s->rx_buf_frames - s->rx_write + s->rx_read - 1);
+    if (frames > rb_avail) {
+        h->stats.late_packets++;  /* Overrun — drop packet */
+        return;
+    }
 
     for (uint16_t f = 0; f < frames; f++) {
         uint16_t wp = (s->rx_write + f) % s->rx_buf_frames;
@@ -536,9 +552,11 @@ static void rx_task(void *arg) {
 
         const abus_net_header_t *hdr = (const abus_net_header_t *)(msg->data + 14);
         const uint8_t *payload = msg->data + 14 + ABUS_NET_HEADER_LEN;
-        uint16_t payload_len = hdr->length;
+        /* FIX #10: byte-swap on receive */
+        uint16_t payload_len = ntohs(hdr->length);
+        uint32_t source_uid = ntohl(hdr->source_uid);
 
-        if (hdr->source_uid == h->uid) {
+        if (source_uid == h->uid) {
             heap_caps_free(msg);
             continue;  /* Ignore our own multicast loopback */
         }
@@ -586,7 +604,7 @@ static void rx_task(void *arg) {
 
                     /* Update GPIO state cache for incoming GPIO data */
                     if (tp->tunnel_type == ABUS_TUNNEL_GPIO && tlen >= 2) {
-                        int idx = gpio_idx_for_uid(h, hdr->source_uid);
+                        int idx = gpio_idx_for_uid(h, source_uid);
                         if (idx >= 0) {
                             h->gpio_in[idx] = (tdata[0] << 8) | tdata[1];
                         }
@@ -594,12 +612,12 @@ static void rx_task(void *arg) {
 
                     /* Dispatch to MIDI callback if registered */
                     if (tp->tunnel_type == ABUS_TUNNEL_MIDI && h->midi_cb && tlen > 0) {
-                        h->midi_cb(hdr->source_uid, tdata, tlen, h->midi_cb_ctx);
+                        h->midi_cb(source_uid, tdata, tlen, h->midi_cb_ctx);
                     }
 
                     /* Dispatch to raw tunnel callback */
                     if (h->tunnel_cb) {
-                        h->tunnel_cb(hdr->source_uid, tp->tunnel_type,
+                        h->tunnel_cb(source_uid, tp->tunnel_type,
                                     tdata, tlen, h->tunnel_cb_ctx);
                     }
                 }
@@ -618,7 +636,7 @@ static void rx_task(void *arg) {
 
             case ABUS_NET_PKT_PONG: {
                 /* Response to our ping — measure roundtrip */
-                if (hdr->source_uid == h->ping_target_uid && payload_len >= 8) {
+                if (source_uid == h->ping_target_uid && payload_len >= 8) {
                     int64_t now = esp_timer_get_time() * 1000;  /* ns */
                     h->ping_roundtrip_ns = now - h->ping_send_time;
                     xSemaphoreGive(h->ping_sem);
@@ -651,21 +669,27 @@ static void beacon_task(void *arg) {
             send_beacon(h);
             last_beacon = now;
 
-            /* Expire stale nodes (no beacon for 3× interval) */
+            /* FIX #14: Collect expired UIDs under lock, invoke callbacks after release */
+            uint32_t expired_uids[ABUS_NET_MAX_NODES];
+            int num_expired = 0;
+
             xSemaphoreTake(h->node_lock, portMAX_DELAY);
             for (int i = 0; i < h->num_nodes; i++) {
                 if (now - h->nodes[i].last_beacon_time >
                     ABUS_NET_BEACON_INTERVAL_MS * 3 * 1000) {
-                    uint32_t lost_uid = h->nodes[i].uid;
-                    /* Remove by swapping with last */
+                    expired_uids[num_expired++] = h->nodes[i].uid;
                     h->nodes[i] = h->nodes[--h->num_nodes];
                     i--;
-                    if (h->config.on_node_lost) {
-                        h->config.on_node_lost(lost_uid, h->config.cb_ctx);
-                    }
                 }
             }
             xSemaphoreGive(h->node_lock);
+
+            /* Invoke callbacks outside the lock — no deadlock risk */
+            for (int i = 0; i < num_expired; i++) {
+                if (h->config.on_node_lost) {
+                    h->config.on_node_lost(expired_uids[i], h->config.cb_ctx);
+                }
+            }
         }
 
         /* Send audio packets for all talker streams */
@@ -758,7 +782,15 @@ esp_err_t abus_net_init(const abus_net_config_t *config, abus_net_handle_t *out)
 
     /* Create PTP engine */
     h->ptp = abus_ptp_create(h->uid, h->config.ptp_priority, h->config.ptp_clock_class);
-    ESP_RETURN_ON_FALSE(h->ptp, ESP_ERR_NO_MEM, TAG, "PTP create failed");
+    /* FIX #24: Clean up on PTP create failure */
+    if (!h->ptp) {
+        vSemaphoreDelete(h->stream_lock);
+        vSemaphoreDelete(h->node_lock);
+        vSemaphoreDelete(h->ping_sem);
+        vQueueDelete(h->rx_queue);
+        free(h);
+        return ESP_ERR_NO_MEM;
+    }
 
     /*
      * Ethernet MAC + PHY initialization.
@@ -820,6 +852,7 @@ esp_err_t abus_net_deinit(abus_net_handle_t h) {
     abus_ptp_destroy(h->ptp);
     vSemaphoreDelete(h->stream_lock);
     vSemaphoreDelete(h->node_lock);
+    vSemaphoreDelete(h->ping_sem);  /* FIX #30 */
     vQueueDelete(h->rx_queue);
 
     /* Free stream buffers */

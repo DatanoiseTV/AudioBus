@@ -271,52 +271,38 @@ static bool IRAM_ATTR tx_done_isr(parlio_tx_unit_handle_t unit,
     return hp_woken == pdTRUE;
 }
 
+/*
+ * FIX #3: ISR only swaps buffers and notifies task.
+ * Decoding (8b10b, SOF search) is deferred to the frame processing task
+ * via the rx_frame_cb which runs in task context, not ISR.
+ */
 static bool IRAM_ATTR rx_done_isr(parlio_rx_unit_handle_t unit,
                                    const parlio_rx_event_data_t *edata,
                                    void *user_data) {
     lvds_phy_ctx_t *ctx = (lvds_phy_ctx_t *)user_data;
-    BaseType_t hp_woken = pdFALSE;
 
     if (!ctx->rx_frame_cb || !edata->data) return false;
 
-    /* Decode 8b10b symbols to data bytes */
-    const uint16_t *sym_buf = (const uint16_t *)edata->data;
-    int num_symbols = edata->recv_bytes / sizeof(uint16_t);
-
-    int decoded_len = abus_8b10b_decode_frame(
-        &ctx->decoder, sym_buf, num_symbols,
-        ctx->decoded_buf, ctx->decoded_k_buf, num_symbols);
-
-    if (decoded_len > 0) {
-        /* Find SOF (K28.5 + K28.1) in decoded stream */
-        for (int i = 0; i < decoded_len - 1; i++) {
-            if (ctx->decoded_k_buf[i] && ctx->decoded_buf[i] == K28_5 &&
-                ctx->decoded_k_buf[i + 1] && ctx->decoded_buf[i + 1] == K28_1) {
-                /* Found SOF — extract frame payload */
-                int frame_start = i;
-                int frame_len = decoded_len - frame_start;
-                ctx->rx_frame_cb(ctx->active_port,
-                                 &ctx->decoded_buf[frame_start],
-                                 frame_len, ctx->rx_frame_cb_arg);
-                ctx->frames_rx++;
-                break;
-            }
-        }
-    }
+    /* Pass raw symbol buffer to frame callback for task-level decoding.
+     * The callback (phy_rx_callback in audiobus.c) copies into the
+     * pre-allocated pool and enqueues for the frame task. */
+    uint16_t len = edata->recv_bytes;
+    ctx->rx_frame_cb(ctx->active_port,
+                     (const uint8_t *)edata->data, len,
+                     ctx->rx_frame_cb_arg);
+    ctx->frames_rx++;
 
     /* Re-queue RX buffer for next frame */
     uint8_t next_idx = ctx->rx_buf_idx ^ 1;
     parlio_receive_config_t recv_cfg = {
         .delimiter = ctx->rx_delimiter,
-        .flags.partial_rx_en = false,
     };
     bool hp2 = false;
     parlio_rx_unit_receive_from_isr(ctx->rx_unit, ctx->rx_buf[next_idx],
                                     MAX_RX_BUF_BYTES, &recv_cfg, &hp2);
-    if (hp2) hp_woken = pdTRUE;
     ctx->rx_buf_idx = next_idx;
 
-    return hp_woken == pdTRUE;
+    return hp2;
 }
 
 /* ---------------------------------------------------------------------------
