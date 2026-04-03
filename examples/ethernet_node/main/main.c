@@ -283,6 +283,31 @@ static void stats_task(void *arg) {
  * Ethernet initialization — Waveshare ESP32-P4-NANO onboard PHY
  * --------------------------------------------------------------------------- */
 
+/*
+ * Waveshare ESP32-P4-NANO RMII pin definitions (IP101GRI PHY):
+ *
+ *   GPIO34  → TXD0       GPIO35  → TXD1
+ *   GPIO29  → RXD0       GPIO30  → RXD1
+ *   GPIO49  → TX_EN
+ *   GPIO28  → CRS_DV
+ *   GPIO50  → REF_CLK    (50 MHz, doubled from 25 MHz external crystal)
+ *   GPIO52  → MDIO       GPIO31  → MDC
+ *   GPIO51  → PHY_RESET
+ *
+ *   PHY address: 1
+ */
+#define P4NANO_ETH_TXD0        34
+#define P4NANO_ETH_TXD1        35
+#define P4NANO_ETH_RXD0        29
+#define P4NANO_ETH_RXD1        30
+#define P4NANO_ETH_TX_EN       49
+#define P4NANO_ETH_CRS_DV      28
+#define P4NANO_ETH_REF_CLK     50
+#define P4NANO_ETH_MDIO        52
+#define P4NANO_ETH_MDC         31
+#define P4NANO_ETH_PHY_RST     51
+#define P4NANO_ETH_PHY_ADDR     1
+
 static esp_eth_handle_t init_ethernet(void) {
     esp_netif_init();
     esp_event_loop_create_default();
@@ -290,11 +315,15 @@ static esp_eth_handle_t init_ethernet(void) {
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
 
+    /* P4-NANO specific RMII pin assignments */
+    emac_config.smi_gpio.mdc_num  = P4NANO_ETH_MDC;
+    emac_config.smi_gpio.mdio_num = P4NANO_ETH_MDIO;
+
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = 1;            /* Waveshare P4-Nano PHY address */
-    phy_config.reset_gpio_num = -1;
+    phy_config.phy_addr = P4NANO_ETH_PHY_ADDR;
+    phy_config.reset_gpio_num = P4NANO_ETH_PHY_RST;
 
     esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_config);
 
@@ -309,8 +338,8 @@ static esp_eth_handle_t init_ethernet(void) {
 
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
-    /* Wait for link up */
-    ESP_LOGI(TAG, "Waiting for Ethernet link...");
+    ESP_LOGI(TAG, "Ethernet initializing (IP101GRI on RMII, PHY addr=%d, RST=GPIO%d)...",
+             P4NANO_ETH_PHY_ADDR, P4NANO_ETH_PHY_RST);
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     return eth_handle;

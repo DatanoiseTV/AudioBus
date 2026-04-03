@@ -50,4 +50,20 @@ typedef enum {
     P4N_I2C_SCL        =  8,
 } esp32_p4_nano_i2c_pin_t;
 
+/* Onboard Ethernet (IP101GRI via RMII - directly wired, NOT on headers) */
+typedef enum {
+    P4N_ETH_TXD0      = 34,
+    P4N_ETH_TXD1      = 35,
+    P4N_ETH_RXD0      = 29,
+    P4N_ETH_RXD1      = 30,
+    P4N_ETH_TX_EN     = 49,
+    P4N_ETH_CRS_DV    = 28,
+    P4N_ETH_REF_CLK   = 50,   /* 50 MHz from 25 MHz xtal × 2 in PHY */
+    P4N_ETH_MDIO      = 52,
+    P4N_ETH_MDC       = 31,
+    P4N_ETH_PHY_RST   = 51,
+} esp32_p4_nano_eth_pin_t;
+
+#define P4N_ETH_PHY_ADDR  1   /* IP101GRI PHY address */
+
 #endif /* ESP32_P4_NANO_PINMAP_H */
