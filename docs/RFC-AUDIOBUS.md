@@ -549,6 +549,12 @@ Table of Contents
    -  Field sizes are given in octets unless
       explicitly noted as bits.
 
+   -  Figures should be globally unique.  Due
+      to document assembly, some figure numbers
+      may be duplicated across sections.
+      Figures are referenced relative to their
+      enclosing section.
+
 
 3.  Protocol Architecture
 
@@ -779,8 +785,15 @@ Table of Contents
    -  Talker UID: the 32-bit Node UID of the
       originating talker.
 
-   -  Sample rate: one of 44100, 48000, 88200, or
-      96000 Hz.
+   -  Sample rate: one of 44100, 48000, 88200,
+      or 96000 Hz.  Sample rate and bit depth
+      are immutable by default.  However,
+      Section 22 defines optional hitless
+      reconfiguration procedures that allow
+      these to change under controlled
+      conditions.  Implementations that support
+      Section 22 MUST follow the procedures
+      defined therein.
 
    -  Bit depth: one of 16, 24, or 32 bits per
       sample.
@@ -1214,11 +1227,10 @@ Table of Contents
          by 1 for each subsequent packet from the
          same source.
 
-      This field is a per-source monotonically
-      increasing counter.  It increments by one
-      for each packet transmitted by the source,
-      regardless of packet type.  The counter
-      wraps from 65535 to 0.
+      For AUDIO packets, the sequence number
+      is per-stream.  For all other packet
+      types, the sequence number is per-source.
+      The counter wraps from 65535 to 0.
 
       The sequence number allows receivers to
       detect packet loss (gaps in the sequence),
@@ -1309,6 +1321,7 @@ Table of Contents
        %x04 /  ; UNSUBSCRIBE
        %x05 /  ; STREAM_ANNOUNCE
        %x06 /  ; STREAM_DELETE
+       %x07 /  ; STREAM_RATE_CHANGE
        %x10 /  ; PTP_SYNC
        %x11 /  ; PTP_FOLLOW_UP
        %x12 /  ; PTP_DELAY_REQ
@@ -1335,6 +1348,11 @@ Table of Contents
 
       Figure 5: ABNF Grammar for Common Header
 
+   Note: the ABNF grammar defines the
+   structural layout.  The payload-len field
+   constrains the actual payload length at
+   runtime.
+
 4.3.  Packet Type Registry
 
    The following table enumerates all packet types
@@ -1350,7 +1368,8 @@ Table of Contents
    | 0x04    | UNSUBSCRIBE      | Sec 9.3   |
    | 0x05    | STREAM_ANNOUNCE  | Sec 9.1   |
    | 0x06    | STREAM_DELETE    | Sec 9.5   |
-   | 0x07-0F | Reserved         | --        |
+   | 0x07    | STREAM_RATE_CHANGE| Sec 22.4 |
+   | 0x08-0F | Reserved         | --        |
    | 0x10    | PTP_SYNC         | Sec 7.3   |
    | 0x11    | PTP_FOLLOW_UP    | Sec 7.4   |
    | 0x12    | PTP_DELAY_REQ    | Sec 7.5   |
@@ -1570,10 +1589,16 @@ Table of Contents
 
    On shared networks, other protocols MAY use
    the same experimental EtherType.  Receivers
-   MUST verify the Version and Pkt Type fields in
-   the common header before processing any frame
-   received on EtherType 0x88B6.  If the Version
-   is not recognized, the frame MUST be discarded.
+   MUST verify the Version and Pkt Type fields
+   in the common header before processing any
+   frame received on EtherType 0x88B6.  If the
+   Version is not recognized, the frame MUST be
+   discarded.
+
+   Deployments sharing the network with other
+   protocols using EtherType 0x88B6 SHOULD use
+   VLAN isolation (Section 5.4) to prevent
+   misidentification.
 
 5.3.  Multicast Addressing
 
@@ -1614,12 +1639,19 @@ Table of Contents
 
    5.3.3.  Audio Stream Groups
 
-      Address: 01:60:AB:HH:LL:00
+      Address: 01:60:AB:UU:HH:LL
+
+      UU is a disambiguation octet derived
+      from the Talker UID:
+
+         UU = (talker_uid >> 8)
+              XOR (talker_uid & 0xFF)
 
       HH is the high octet and LL is the low
-      octet of the 16-bit Stream ID.  Each active
-      stream has a unique multicast address
-      derived from its Stream ID.
+      octet of the 16-bit Stream ID.  Including
+      the Talker UID prevents multicast address
+      collision when two talkers use the same
+      Stream ID.
 
       A talker transmits AUDIO packets for a
       given stream to that stream's multicast
@@ -1634,8 +1666,15 @@ Table of Contents
       (Stream ID 0x0000) and MUST NOT be used
       as an audio stream group address.
 
-      Example: Stream ID 0x0042 uses multicast
-      address 01:60:AB:00:42:00.
+      Stream IDs 0xFFFF and 0xFF01 are reserved
+      to avoid collision with the Discovery and
+      PTP multicast groups.  A talker MUST NOT
+      use these Stream IDs.
+
+      Example: Talker UID 0x0000A3F2,
+      Stream ID 0x0042.
+         UU = (0xA3) XOR (0xF2) = 0x51
+         Address: 01:60:AB:51:00:42.
 
    5.3.4.  Multicast Group Summary
 
@@ -1644,7 +1683,7 @@ Table of Contents
    +-------------------+-------------------------+
    | 01:60:AB:FF:FF:00 | Discovery/Control       |
    | 01:60:AB:FF:FF:01 | PTP Synchronization     |
-   | 01:60:AB:HH:LL:00 | Audio (per stream)      |
+   | 01:60:AB:UU:HH:LL | Audio (per stream)      |
    | 01:60:AB:00:00:00 | Reserved                |
    +-------------------+-------------------------+
 
@@ -2686,11 +2725,12 @@ Table of Contents
        guard time.  During this period, the
        bus is undriven (high impedance).
 
-   5.  The first upstream transmitter (the slave
-       at the end of the chain) enables its
-       driver and begins transmitting K28.3 idle
-       fill for at least 2 symbols, followed by
-       upstream data.
+   5.  The first upstream node MUST transmit at
+       least 2 K28.5 comma symbols before
+       upstream data begins, to allow downstream
+       receivers to re-acquire byte alignment.
+       Following the commas, the node transmits
+       K28.3 idle fill, then upstream data.
 
    6.6.2.  Guard Time
 
@@ -2700,6 +2740,18 @@ Table of Contents
    clock and data recovery (CDR) circuit at each
    receiver to re-acquire lock on the new
    transmitter's signal.
+
+   The guard time of 32 symbol periods refers
+   to 32 10-bit symbols on the wire, which
+   decode to 32 data bytes.  However, the
+   guard symbols are K-characters (K28.5 +
+   K27.7 + K28.3 idle fill) that are stripped
+   by the 8b10b decoder and do NOT consume
+   frame payload bytes.  The 4-byte overhead
+   in the frame capacity calculation refers
+   only to the K28.5 and K27.7 markers that
+   occupy decoded positions in the frame
+   layout.
 
    The guard time formula is:
 
@@ -3220,6 +3272,14 @@ Table of Contents
    they have elected as grandmaster and MUST
    silently discard PTP_SYNC from other sources.
 
+   During preemption, the old grandmaster MUST
+   cease Sync transmission within one Sync
+   interval (125 ms) of receiving a beacon
+   from a superior clock.  Nodes MUST NOT
+   process Sync from a new grandmaster until
+   they have independently confirmed it via
+   BMC from the new node's beacon.
+
 7.3.  Sync Message (Type 0x10)
 
    The PTP_SYNC message is transmitted by the
@@ -3562,6 +3622,16 @@ Table of Contents
    -  A slave MUST NOT transmit PTP_DELAY_REQ
       before it has received at least one valid
       Sync/Follow_Up pair from the grandmaster.
+
+   -  The grandmaster SHOULD rate-limit
+      Delay_Resp processing to a maximum of
+      4 per Sync interval (32 per second).
+      If more than 32 slaves are present,
+      slaves MUST space their Delay_Req
+      intervals proportionally:
+
+         Delay_Req_interval =
+            max(500ms, node_count * 62.5ms)
 
    ABNF for Delay_Req payload:
 
@@ -3956,9 +4026,14 @@ Table of Contents
           = -20 * log10(3.77e-5)
           = 88.5 dB
 
-   This exceeds the 24-bit dynamic range of
-   approximately 144 dB by a comfortable margin,
-   confirming that 1 ns jitter is adequate.
+   At 1 ns peak-to-peak jitter, the
+   jitter-limited SNR is approximately
+   88.5 dB at 20 kHz.  This is adequate for
+   16-bit audio (96 dB theoretical SNR) but
+   NOT for 24-bit (144 dB).
+   Implementations targeting 24-bit fidelity
+   at high frequencies SHOULD achieve jitter
+   below 100 picoseconds.
 
 7.10. Hardware Timestamping
 
@@ -4325,6 +4400,12 @@ Table of Contents
    XOR-ing its current UID with 0x80000000 and
    re-announce.
 
+   If the XOR-resolved UID still collides, the
+   node MUST generate a random 32-bit UID using
+   the hardware RNG and retry.  A node MUST NOT
+   begin protocol operation until it holds a
+   unique UID.
+
    Node Name:
 
       The node name is a human-readable UTF-8 string
@@ -4466,8 +4547,15 @@ Table of Contents
 9.1.  Stream Announcement (Type 0x05)
 
    A talker advertises each published stream by
-   periodically transmitting a stream announcement
-   packet.
+   periodically transmitting a stream
+   announcement packet.
+
+   Each STREAM_ANNOUNCE MUST include a
+   monotonically increasing 16-bit
+   stream_epoch counter that increments when
+   a stream is recreated.  Listeners MUST
+   treat a stream_epoch change as a new
+   stream.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -4982,8 +5070,16 @@ Table of Contents
        release samples to the audio output.
 
    All listeners receiving the same stream MUST
-   begin playout at the same PTP-referenced instant,
-   ensuring sample-accurate synchronization.
+   begin playout at the same PTP-referenced
+   instant, ensuring sample-accurate
+   synchronization.
+
+   A talker MUST NOT send AUDIO packets until
+   its PTP state has been READY (offset < 1 us)
+   for at least 5 consecutive Sync cycles
+   (625 ms).  A listener MUST NOT begin playout
+   until its own PTP clock achieves READY
+   state.
 
    PTS wrap-around:
 
@@ -5033,6 +5129,17 @@ Table of Contents
    accuracy, the talker MUST alternate between
    N and N+1 samples per packet such that the
    average sample rate is exact.
+
+   The talker MUST use a Bresenham-style
+   accumulator: maintain a running fractional
+   sample count.  When the accumulator exceeds
+   1.0, transmit N+1 samples and subtract 1.0;
+   otherwise transmit N samples.  The Samples
+   per Channel field MUST reflect the actual
+   count in each individual packet.  Listeners
+   MUST handle variable packet sizes by
+   checking this field on every received
+   packet.
 
 10.6.  Sequence Numbering and Gap Detection
 
@@ -5212,6 +5319,15 @@ Table of Contents
    Implementations SHOULD support jumbo frames
    (9000 octets) when available.
 
+   A talker MUST validate that the audio
+   payload size (channels * samples_per_ch *
+   (bit_depth/8)) plus 46 octets of overhead
+   does not exceed the link MTU minus VLAN
+   tag overhead.  If it exceeds, the talker
+   MUST reduce the packet interval or split
+   into multiple streams before beginning
+   transmission.
+
 10.10. Bandwidth Calculation
 
    The aggregate bandwidth for a single stream:
@@ -5324,6 +5440,11 @@ Table of Contents
       Increments per packet per tunnel type per
       target.  Wraps from 255 to 0.  Receivers use
       this to detect loss and reordering.
+
+      Implementations MUST track outstanding
+      tunnel requests and reject responses whose
+      Tunnel Seq does not match any pending
+      request.
 
    Tunnel Len:  16 bits.  Big-endian.  Length of the
       tunnel-data field in octets.
@@ -5602,10 +5723,13 @@ Table of Contents
 
          Figure 18: Sideband Payload
 
-   The sideband byte is embedded in every audio
-   packet (Ethernet mode) or every TDM frame
-   (LVDS mode).  It has zero additional latency
-   beyond the audio transport itself.
+   In Ethernet mode, the sideband byte is
+   carried in dedicated TUNNEL packets of type
+   SIDEBAND (type 4), NOT embedded in audio
+   packets.  In LVDS mode, the sideband byte
+   occupies a fixed position in the TDM frame.
+   It has zero additional latency beyond the
+   audio transport itself.
 
    Typical uses:
 
@@ -5684,8 +5808,14 @@ Table of Contents
    Meta Sequence:  16 bits.  Sequence number for
       ordering fragmented metadata.
 
-   Total Entries:  16 bits.  Total number of entries
-      across all fragments.
+   Total Entries:  16 bits.  Total number of
+      entries across all fragments.
+
+   Metadata fragments MUST be transmitted in
+   order.  If any fragment is lost (detected
+   by Meta Sequence gap), the receiver MUST
+   discard all fragments of that key and
+   request retransmission.
 
 12.2.  Metadata Entry Encoding
 
@@ -7476,6 +7606,12 @@ E.2.  CPU Budget
    budget drops to approximately 8-10 us, well
    within the 20.83 us frame period.
 
+   Implementations targeting more than 8 audio
+   channels on LVDS at 48 kHz MUST use DMA
+   offload for 8b10b encoding and decoding.
+   Single-core non-DMA implementations MUST
+   limit their advertised channel count to 8.
+
 E.3.  Suggested Task Priorities
 
    FreeRTOS task priorities for an AudioBus node
@@ -7709,6 +7845,15 @@ Authors' Addresses
 
 
 19.  Rapid Discovery Protocol
+
+   Sections 19 through 24 define extensions to
+   the base protocol.  These sections formally
+   update the beacon Flags field (Section 8.1):
+   bits 4-6 are assigned as FIRST_SEEN (4),
+   REDUNDANCY (5), and ULTRA_LOW (6).
+   Receivers that do not implement these
+   extensions MUST ignore these bits per the
+   original reserved-bit rule.
 
    (REPLACES Section 8.2 "Beacon Timing")
 
@@ -8181,18 +8326,13 @@ Authors' Addresses
    |    4 | 500       |     24 | Balanced |
    |    3 | 250       |     12 | Low lat. |
    |    2 | 125       |      6 | ULL      |
-   |    1 | 62.5      |      3 | Sub-ULL  |
-   |    0 | 31.25     |   1(*) | Near-min |
-   |   -1 | 20.83     |      1 |Ultra-low |
    +------+-----------+--------+----------+
 
-   (*) At 48 kHz, 31.25 us yields 1.5 samples
-       per interval.  The talker alternates
-       between 1 and 2 samples per packet.
-
-   Tier -1 corresponds to ultra-low latency
-   mode (Section 10A) and is only available if
-   the ULTRA_LOW capability is advertised.
+   Note: Sub-125us intervals (62.5, 31.25,
+   20.83 us) are only valid when Ultra-Low
+   Latency Mode (Section 20) is active.
+   They are not part of the standard adaptive
+   tier ladder.
 
    Table 10B-1: Adaptive Interval Tiers
 
@@ -8842,20 +8982,28 @@ Authors' Addresses
    payload length before reading these fields
    to maintain backward compatibility.
 
+   Beacon extension fields (network_quality,
+   max_safe_interval) MUST be encoded as TLV
+   entries after the Node Name.  Each
+   extension: [type: 1 octet] [length:
+   1 octet] [value: length octets].
+   Receivers MUST skip unknown TLV types.
+
 24.5.  Probe Packet Format
 
    Probes reuse the existing PING packet format
    (Section 13.1, Type 0x40) with an additional
    flag:
 
-      Bit 1 (0x4000) of the common header
-      Flags field: PROBE.  Set to 1 for probe
-      PINGs.  Set to 0 for normal PINGs.
+      Network probes are identified by setting
+      bit 0 of the Ping payload's first octet
+      to 1.  The common header Flags reserved
+      bits MUST NOT be repurposed.
 
-   A node receiving a PING with the PROBE flag
-   MUST respond with PONG immediately,
-   bypassing any normal rate-limiting on PONG
-   responses.
+   A node receiving a PING with the PROBE
+   payload flag MUST respond with PONG
+   immediately, bypassing any normal
+   rate-limiting on PONG responses.
 
    Probe PINGs MUST NOT be transmitted after
    the initial startup probe sequence.  A node
