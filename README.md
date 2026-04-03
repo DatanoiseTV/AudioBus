@@ -1,8 +1,21 @@
 # AudioBus
 
-**Multi-channel audio + IO multiplexing over a single twisted pair**
+**Multi-channel audio + IO protocol for ESP32-P4**
 
-An open-source ESP-IDF component that carries up to 64 channels of 32-bit audio, SPI/I2C/GPIO/MIDI tunneling, and a sideband data channel over a single twisted-pair wire. Daisy-chainable, hot-pluggable, self-clocking, deterministic, and zero-jitter.
+Two transport modes, one API:
+
+| | Ethernet Mode | LVDS Bus Mode |
+|---|---|---|
+| **Topology** | Star (any switch) | Daisy chain (single pair) |
+| **Setup** | Plug into switch, done | Wire SN65LVDT41 transceiver |
+| **Discovery** | Automatic (multicast) | Master-initiated |
+| **Master/Slave** | None (peer-to-peer) | Master + slaves |
+| **Clock sync** | PTP (HW timestamped) | CDR / software PLL |
+| **Channels** | 64/stream @ 48kHz | 25/dir (1-chip) or 64 (2-chip) |
+| **Latency** | ~2ms (configurable) | ~21µs per hop |
+| **Tunneling** | GPIO + MIDI + SPI + I2C | GPIO + MIDI + SPI + I2C |
+| **Diagnostics** | Per-stream jitter, ping RTT | Per-node roundtrip |
+| **IP coexistence** | Yes (same port) | N/A (dedicated wire) |
 
 Built on commodity components — no proprietary silicon required.
 
@@ -405,97 +418,102 @@ Compare with the 2-chip SerDes: 24 GPIO pins for the bus alone. The single-chip 
 - ESP-IDF v5.2+ (for ESP32-P4 PARLIO driver support)
 - ESP32-P4 target
 
-### Build the Master Example
+### Ethernet Mode — Fastest Way to Test (Recommended)
+
+Plug 2+ Waveshare ESP32-P4-NANO boards into an Ethernet switch. Flash the same firmware on all of them. They auto-discover each other, elect a PTP grandmaster, stream audio, and tunnel GPIO/MIDI — zero configuration.
 
 ```bash
-cd examples/master_node
+cd examples/ethernet_node
 idf.py set-target esp32p4
 idf.py build
-idf.py flash monitor
+idf.py -p /dev/ttyUSB0 flash monitor    # Board A
+idf.py -p /dev/ttyUSB1 flash monitor    # Board B (separate terminal)
 ```
 
-### Build the Slave Example
+**What you'll see in the logs:**
 
-```bash
-cd examples/slave_node
-idf.py set-target esp32p4
-idf.py build
-idf.py flash monitor
+```
+I (1200) abus_test: ========================================
+I (1200) abus_test:   AudioBus Ethernet Test
+I (1200) abus_test:   Board: P4-Nano-A3F2
+I (1200) abus_test: ========================================
+I (3200) abus_test: [DISCOVER] Node "P4-Nano-B71E" (uid=0x0000B71E, type=3, streams=1)
+I (3200) abus_test: [STREAM] "P4-Nano-B71E Stereo" (id=0xB710, 2ch/32bit/48000Hz)
+I (3200) abus_test: [SUBSCRIBE] Listening to "P4-Nano-B71E Stereo"
+I (6200) abus_test: --- P4-Nano-A3F2 stats ---
+I (6200) abus_test:   PTP: GRANDMASTER  offset=0ns  delay=0ns  syncs=24
+I (6200) abus_test:   Stream 0xB710 latency:
+I (6200) abus_test:     Total: 3000us  Network: 42us  Buffer: 1958us
+I (6200) abus_test:     Jitter: RMS=1250ns  Peak=4200ns  [800..4200]ns
+I (6200) abus_test:     Packets: rx=3000  lost=0  late=0  loss=0.0000%
+I (6200) abus_test:   Ping "P4-Nano-B71E" (0x0000B71E):
+I (6200) abus_test:     RTT: 85us  avg=82us  [78..92]us  jitter=3us
+I (8200) abus_test: [GPIO TX] Pin 0 → HIGH on node 0x0000B71E
+I (8200) abus_test: [MIDI TX] Note On: note=60 vel=100 → 0x0000B71E
 ```
 
-### Minimal Master Code
+### What the Test Does
+
+Each board automatically:
+
+1. **Publishes** a named stereo stream ("P4-Nano-XXXX Stereo", 440Hz sine wave)
+2. **Subscribes** to the first remote stream it discovers
+3. **Elects** a PTP grandmaster (lowest MAC address wins)
+4. **Measures** and prints every 3 seconds:
+   - Per-stream: total latency, network latency, buffer depth, jitter (RMS/peak), packet loss
+   - Per-node: active ping roundtrip (avg/min/max), PTP one-way, jitter
+   - PTP state: grandmaster or slave, clock offset, path delay
+5. **Tunnels** GPIO (toggles pin 0 on remote) and MIDI (note-on) every 2 seconds
+
+### Minimal Ethernet Node Code
 
 ```c
-#include "audiobus.h"
+#include "audiobus_net.h"
 
 void app_main(void) {
-    abus_config_t config = {
-        .role = ABUS_ROLE_MASTER,
-        .phy_type = ABUS_PHY_LVDS_SERDES,
-        .sample_rate = ABUS_SR_48000,
-        .bit_depth = ABUS_DEPTH_32,
-        .pins.lvds_pins = {
-            .upstream_tx_data = {7,8,9,10,11,12,13,14,15,16},
-            .upstream_tx_clk  = 17,
-            .upstream_tx_oe   = 18,
-            .upstream_rx_data = {19,20,21,22,23,24,25,26,27,28},
-            .upstream_rx_clk  = 29,
-            .upstream_rx_lock = 30,
-            .downstream_tx_clk = -1,  /* single-port master */
-        },
+    /* 1. Initialize Ethernet (board-specific) */
+    esp_eth_handle_t eth = init_ethernet();
+
+    /* 2. Create AudioBus network transport — no master/slave, just plug in */
+    abus_net_config_t config = {
+        .name = "My Node",
+        .default_sample_rate = 48000,
+        .default_bit_depth = 32,
+        .default_packet_interval_us = 1000,  /* 1ms packets */
+        .presentation_latency_us = 2000,     /* 2ms playout buffer */
     };
+    abus_net_handle_t net;
+    abus_net_init(&config, &net);
+    abus_net_attach_eth(net, eth);
+    abus_net_start(net);
 
-    abus_handle_t bus;
-    abus_init(&config, &bus);
-    abus_start(bus);
+    /* 3. Publish a stream (any node can be a talker) */
+    uint16_t stream_id;
+    abus_net_stream_create(net, "Main Out", 2, 48000, 32, 0, &stream_id);
 
-    /* Write 2-channel audio downstream */
-    int32_t samples[2] = {0, 0};
-    while (1) {
-        /* Fill samples with your audio data... */
-        abus_audio_write(bus, samples, 1);
-    }
-}
-```
+    /* 4. Subscribe to a remote stream (by talker UID + stream ID) */
+    abus_net_subscribe(net, remote_uid, remote_stream_id, 0);
 
-### Minimal Slave Code
-
-```c
-#include "audiobus.h"
-
-void app_main(void) {
-    abus_config_t config = {
-        .role = ABUS_ROLE_SLAVE,
-        .phy_type = ABUS_PHY_LVDS_SERDES,
-        .sample_rate = ABUS_SR_48000,
-        .bit_depth = ABUS_DEPTH_32,
-        .node_desc = {
-            .hw_type = 1,               /* speaker */
-            .max_dn_channels = 2,
-            .max_up_channels = 0,
-            .tunnel_request = (1 << ABUS_TUNNEL_GPIO),
-            .tunnel_bw_request = 2,
-            .uid = 0x00000001,
-        },
-        .pins.lvds_pins = {
-            /* same pin layout as master... */
-            .downstream_tx_clk = -1,  /* end-node, no downstream port */
-        },
-    };
-
-    abus_handle_t bus;
-    abus_init(&config, &bus);
-    abus_start(bus);
-
-    /* Read 2-channel audio from bus → feed to I2S DAC */
+    /* 5. Read/write audio */
     int32_t samples[2];
     while (1) {
-        if (abus_audio_read(bus, samples, 1) > 0) {
-            /* Output samples to I2S... */
-        }
+        abus_net_stream_write(net, stream_id, samples, 1);   /* Talker */
+        abus_net_stream_read(net, remote_stream_id, samples, 1); /* Listener */
     }
 }
 ```
+
+### Bus Mode (LVDS Twisted Pair)
+
+For the single-pair LVDS bus mode with SN65LVDT41 transceiver:
+
+```bash
+cd examples/master_node    # or slave_node
+idf.py set-target esp32p4
+idf.py build flash monitor
+```
+
+See [HARDWARE.md](docs/HARDWARE.md) for LVDS wiring details.
 
 ## Project Structure
 
@@ -503,26 +521,32 @@ void app_main(void) {
 audiobus/
 ├── components/audiobus/
 │   ├── include/
-│   │   ├── audiobus.h              # Public API
+│   │   ├── audiobus.h              # Bus mode public API (LVDS)
+│   │   ├── audiobus_net.h          # Ethernet mode public API
 │   │   ├── audiobus_types.h        # Protocol types, frame format, constants
 │   │   ├── audiobus_phy.h          # PHY abstraction (vtable)
-│   │   └── audiobus_tunnel.h       # Tunnel subsystem API
+│   │   └── audiobus_tunnel.h       # Tunnel subsystem API (bus mode)
 │   ├── src/
-│   │   ├── audiobus.c              # Core engine, state machine, audio ring buffers
+│   │   ├── audiobus.c              # Bus mode engine, state machine, ring buffers
 │   │   ├── audiobus_frame.c        # Frame packing, slot map computation
-│   │   ├── audiobus_discovery.c    # Node discovery and hot-plug
-│   │   ├── audiobus_tunnel.c       # SPI/I2C/GPIO/MIDI tunnel pack/unpack
+│   │   ├── audiobus_discovery.c    # Node discovery and hot-plug (bus mode)
+│   │   ├── audiobus_tunnel.c       # SPI/I2C/GPIO/MIDI tunnel (bus mode)
 │   │   ├── phy/
-│   │   │   └── phy_lvds_serdes.c   # LVDS PHY driver (PARLIO + DS92LV)
+│   │   │   ├── phy_lvds_oneic.c    # SN65LVDT41 single-chip PHY (recommended)
+│   │   │   └── phy_lvds_serdes.c   # DS92LV 10:1 SerDes PHY (max performance)
+│   │   ├── net/
+│   │   │   ├── abus_net.c          # Ethernet transport engine
+│   │   │   └── abus_ptp.c          # PTP clock sync with HW timestamping
 │   │   └── codec/
-│   │       └── codec_8b10b.c       # 8b10b encoder/decoder (lookup tables)
+│   │       └── codec_8b10b.c       # 8b10b encoder/decoder
 │   ├── CMakeLists.txt
-│   └── Kconfig                     # Build-time configuration
+│   └── Kconfig
 ├── examples/
-│   ├── master_node/                # Master node example (sine wave generator)
-│   └── slave_node/                 # Slave node example (speaker + mic bridge)
+│   ├── ethernet_node/              # Plug-and-play Ethernet test (P4-NANO)
+│   ├── master_node/                # LVDS bus master example
+│   └── slave_node/                 # LVDS bus slave example
 ├── docs/
-│   └── HARDWARE.md                 # Detailed schematics, BOM, PCB notes
+│   └── HARDWARE.md                 # Schematics, BOM, PCB notes
 └── README.md
 ```
 
