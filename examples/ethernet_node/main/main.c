@@ -315,9 +315,21 @@ static esp_eth_handle_t init_ethernet(void) {
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
 
-    /* P4-NANO specific RMII pin assignments */
+    /* P4-NANO RMII pin assignments (required for ESP32-P4 rev 1.0+) */
     emac_config.smi_gpio.mdc_num  = P4NANO_ETH_MDC;
     emac_config.smi_gpio.mdio_num = P4NANO_ETH_MDIO;
+
+    /* Explicitly set RMII data interface GPIOs (not optional on P4 rev 1.0+) */
+    emac_config.emac_dataif_gpio.rmii.tx_en_num  = P4NANO_ETH_TX_EN;
+    emac_config.emac_dataif_gpio.rmii.txd0_num   = P4NANO_ETH_TXD0;
+    emac_config.emac_dataif_gpio.rmii.txd1_num   = P4NANO_ETH_TXD1;
+    emac_config.emac_dataif_gpio.rmii.crs_dv_num = P4NANO_ETH_CRS_DV;
+    emac_config.emac_dataif_gpio.rmii.rxd0_num   = P4NANO_ETH_RXD0;
+    emac_config.emac_dataif_gpio.rmii.rxd1_num   = P4NANO_ETH_RXD1;
+
+    /* REF_CLK: 50 MHz from PHY (external input to ESP32-P4 EMAC) */
+    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
+    emac_config.clock_config.rmii.clock_gpio = P4NANO_ETH_REF_CLK;
 
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
 
