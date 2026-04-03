@@ -9,7 +9,7 @@ Built on commodity components — no proprietary silicon required.
 ```
 ┌──────────┐  1 twisted  ┌──────────┐  1 twisted  ┌──────────┐  1 twisted  ┌──────────┐
 │  MASTER  │────pair────→│  SLAVE 1 │────pair────→│  SLAVE 2 │────pair────→│  SLAVE 3 │
-│ ESP32-P4 │←───────────│ speaker  │←───────────│ spk+mic  │←───────────│ analog   │
+│ ESP32-P4 │←───────────-│ speaker  │←───────────-│ spk+mic  │←────────-───│ analog   │
 │          │  491 Mbps   │  node    │  491 Mbps   │  node    │  491 Mbps   │  bridge  │
 │ EMAC free│  half-dpx   │ EMAC free│             │ EMAC free│             │ EMAC free│
 └──────────┘             └──────────┘             └──────────┘             └──────────┘
@@ -78,14 +78,14 @@ At configuration time, the master computes a **slot map** — a fixed assignment
 ```
 Slot Map (computed once at config time):
 ┌─────────────────────────────────────────────────────────────────┐
-│ Channel 0 (Node 1, DN, 32-bit) → frame bytes [10..13]          │
-│ Channel 1 (Node 1, DN, 32-bit) → frame bytes [14..17]          │
-│ Channel 2 (Node 2, DN, 32-bit) → frame bytes [18..21]          │
+│ Channel 0 (Node 1, DN, 32-bit) → frame bytes [10..13]           │
+│ Channel 1 (Node 1, DN, 32-bit) → frame bytes [14..17]           │
+│ Channel 2 (Node 2, DN, 32-bit) → frame bytes [18..21]           │
 │ ...                                                             │
 │ GPIO tunnel (Node 1, DN)       → frame bytes [266..267]         │
 │ MIDI tunnel (Node 2, DN)       → frame bytes [268..270]         │
 │ ─── GUARD (direction turnaround) ───                            │
-│ Channel 64 (Node 1, UP, 32-bit) → frame bytes [514..517]       │
+│ Channel 64 (Node 1, UP, 32-bit) → frame bytes [514..517]        │
 │ ...                                                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -100,7 +100,7 @@ The key hardware trick: we use **TI DS92LV1021A** (10:1 LVDS serializer) and **D
   ESP32-P4                    DS92LV1021A              Twisted Pair
  ┌─────────┐                ┌─────────────┐           ╔═══════════╗
  │ PARLIO  │  10-bit @      │ 10:1 LVDS   │  491 Mbps ║           ║
- │ TX unit │──49.152 MHz──→│ Serializer  │──LVDS───→║  Single   ║
+ │ TX unit │──49.152 MHz──-→│ Serializer  │──LVDS──--─→║  Single   ║
  │         │  (16-bit bus,  │             │           ║  Twisted  ║
  │         │   bits 0-9)    │ PDB=OE ctrl │←──GPIO    ║  Pair     ║
  │         │                └─────────────┘           ║           ║
@@ -108,11 +108,11 @@ The key hardware trick: we use **TI DS92LV1021A** (10:1 LVDS serializer) and **D
  │         │                DS92LV1212A               ║  or STP   ║
  │         │                ┌─────────────┐           ║           ║
  │ PARLIO  │  10-bit +      │ 1:10 LVDS   │  CDR      ║  up to    ║
- │ RX unit │←─recov. clk──│ Deserializer │←─LVDS────║  15-20m   ║
- │         │                │   with CDR   │           ║           ║
- │         │  LOCK status──│ PLL locked!  │→──GPIO    ╚═══════════╝
+ │ RX unit │←─recov. clk─--─│ Deserializer│←─LVDS─-─-─║  15-20m   ║
+ │         │                │   with CDR  │           ║           ║
+ │         │  LOCK status─-─│ PLL locked! │→──GPIO    ╚═══════════╝
  └─────────┘                └─────────────┘
-                              ↑
+                              
                           RCLK = recovered 49.152 MHz
                           (self-clocking! no clock wire needed)
 ```
@@ -142,7 +142,7 @@ The DS92LV1212A CDR PLL locks onto these transitions and outputs a recovered clo
 ┌───────────┐              ┌───────────┐              ┌───────────┐
 │           │              │           │              │           │
 │  49.152   │   LVDS #1    │  DS92LV   │   LVDS #2    │  DS92LV   │
-│  MHz XO ──┼──→ SER ──────┼→ DESER   │──→ SER ──────┼→ DESER    │
+│  MHz XO ──┼──→ SER ──────┼→ DESER    │──→ SER ──────┼→ DESER    │
 │           │              │  CDR PLL  │              │  CDR PLL  │
 │           │              │    ↓      │              │    ↓      │
 │           │              │  RCLK ────┼──→ PARLIO    │  RCLK ────┼──→ PARLIO
@@ -170,7 +170,7 @@ Both the serializer and deserializer connect to the **same twisted pair**. Direc
 │  OUT+/OUT- ──┐   │    ┌──────────────┐    │   ┌── OUT+/OUT-  │
 │  PDB=GPIO    ├───┼────┤ Twisted Pair ├────┼───┤  PDB=GPIO    │
 │ DS92LV1212A  │   │    └──────────────┘    │   │ DS92LV1212A  │
-│  IN+/IN-  ───┘   │         100Ω          │   └── IN+/IN-    │
+│  IN+/IN-  ───┘   │         100Ω           │   └── IN+/IN-    │
 │  LOCK → GPIO     │      termination       │      LOCK → GPIO │
 └──────────────────┘      (each end)        └──────────────────┘
 
@@ -253,11 +253,11 @@ At 48 kHz with 32 channels of 32-bit audio, **246 bytes per frame** are availabl
 
 ```
                            ESP32-P4
-                        ┌──────────────┐
-  49.152 MHz XO    ────→│ GPIO 6  (CLK IN)         │
-  (master only,         │                          │
-   slave uses RCLK)     │                          │
-                        │          PARLIO TX        │
+                        ┌─────────────────────────┐
+  49.152 MHz XO    ────→│ GPIO 6  (CLK IN)        │
+  (master only,         │                         │
+   slave uses RCLK)     │                         │
+                        │          PARLIO TX      │
   DS92LV1021A DIN0 ←───│ GPIO 7   (TX D0)         │
   DS92LV1021A DIN1 ←───│ GPIO 8   (TX D1)         │
   DS92LV1021A DIN2 ←───│ GPIO 9   (TX D2)         │
@@ -270,8 +270,7 @@ At 48 kHz with 32 channels of 32-bit audio, **246 bytes per frame** are availabl
   DS92LV1021A DIN9 ←───│ GPIO 16  (TX D9)         │
   DS92LV1021A TCLK ←───│ GPIO 17  (TX CLK OUT)    │
   DS92LV1021A PDB  ←───│ GPIO 18  (TX OE)         │
-                        │                          │
-                        │          PARLIO RX        │
+                       │          PARLIO RX        │
   DS92LV1212A DOUT0 ──→│ GPIO 19  (RX D0)         │
   DS92LV1212A DOUT1 ──→│ GPIO 20  (RX D1)         │
   DS92LV1212A DOUT2 ──→│ GPIO 21  (RX D2)         │
