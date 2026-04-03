@@ -1,0 +1,42 @@
+menu "AudioBus Configuration"
+
+    config ABUS_MAX_NODES
+        int "Maximum number of nodes in the daisy chain"
+        default 16
+        range 2 16
+
+    config ABUS_FRAME_TASK_STACK
+        int "Frame processing task stack size"
+        default 4096
+
+    config ABUS_FRAME_TASK_PRIORITY
+        int "Frame processing task priority"
+        default 23
+        help
+            Should be near configMAX_PRIORITIES for lowest audio latency.
+
+    config ABUS_AUDIO_BUF_FRAMES
+        int "Default audio ring buffer depth (sample frames)"
+        default 8
+        range 4 64
+
+    config ABUS_GUARD_SYMBOLS
+        int "Guard symbols between TX/RX phases for CDR relock"
+        default 32
+        range 8 128
+        help
+            Number of K28.3 idle symbols inserted at direction turnaround.
+            32 symbols = ~650ns at 491 Mbps. Increase if CDR relock is unreliable.
+
+    choice ABUS_SAMPLE_RATE_FAMILY
+        prompt "Default sample rate family"
+        default ABUS_SR_48K_FAMILY
+
+        config ABUS_SR_48K_FAMILY
+            bool "48kHz family (48/96 kHz, MCLK = 49.152 MHz)"
+
+        config ABUS_SR_44K_FAMILY
+            bool "44.1kHz family (44.1/88.2 kHz, MCLK = 45.158 MHz)"
+    endchoice
+
+endmenu

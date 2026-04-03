@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS
+        "src/audiobus.c"
+        "src/audiobus_frame.c"
+        "src/audiobus_discovery.c"
+        "src/audiobus_tunnel.c"
+        "src/phy/phy_lvds_serdes.c"
+        "src/codec/codec_8b10b.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_parlio
+        esp_driver_gpio
+        freertos
+        esp_common
+        log
+        heap
+)
