@@ -92,6 +92,7 @@ typedef struct {
 
     /* Packet timer */
     esp_timer_handle_t  tx_timer;
+    void               *tx_timer_ctx[2];  /* [0]=handle, [1]=stream index */
 
     /* Jitter measurement (listener only, RFC 3550 style) */
     int64_t             last_arrival_ns;        /* PTP time of last packet arrival */
@@ -133,7 +134,19 @@ struct abus_net_handle {
 
     /* Remote streams (announced by other nodes) */
     abus_net_stream_t   remote_streams[ABUS_NET_MAX_NODES * 4];
-    uint8_t             num_remote_streams;
+    uint16_t            num_remote_streams;
+
+    /* Metadata key-value store (node-level and per-stream) */
+    struct {
+        uint16_t    stream_id;          /* 0 = node-level */
+        char        key[32];
+        char        value[64];
+        bool        used;
+    } metadata[16];
+    uint8_t             num_metadata;
+
+    /* Last RX frame arrival (esp_timer_get_time µs) for link detection */
+    int64_t             last_rx_frame_time;
 
     /* Tunnel callback (raw) */
     void (*tunnel_cb)(uint32_t sender_uid, abus_tunnel_type_t type,
@@ -181,6 +194,8 @@ struct abus_net_handle {
 
 /* Forward declarations */
 static int gpio_idx_for_uid(struct abus_net_handle *h, uint32_t uid);
+static void send_audio_packet(struct abus_net_handle *h, local_stream_t *s);
+static void send_stream_announce(struct abus_net_handle *h, local_stream_t *s);
 
 static void stream_id_to_mcast(uint16_t stream_id, uint8_t *mac) {
     mac[0] = 0x01; mac[1] = 0x60; mac[2] = 0xAB;
@@ -233,13 +248,25 @@ static esp_err_t send_raw_frame(struct abus_net_handle *h,
  * Audio packet TX — called by timer at the configured packet interval
  * --------------------------------------------------------------------------- */
 
-static void IRAM_ATTR audio_tx_timer_cb(void *arg) {
-    local_stream_t *s = (local_stream_t *)arg;
-    /* This is called from timer ISR context. Set a flag or use a task notification
-     * to trigger the actual packet send from a task context.
-     * For now, we mark that a TX is due. The TX task picks it up. */
-    /* In a production system, this would use a high-priority task notification. */
-    (void)s;
+/**
+ * Audio TX timer callback — fires at the stream's packet interval.
+ * Called from esp_timer task context (high priority), sends audio packets
+ * directly for minimal jitter.
+ */
+static void audio_tx_timer_cb(void *arg) {
+    /* arg points to the first stream; the handle is recovered via container_of-style
+     * offset, but we store the handle pointer in the stream's tx_timer user data
+     * instead. We solve this by passing an array: [handle_ptr, stream_index]. */
+    void **ctx = (void **)arg;
+    struct abus_net_handle *h = (struct abus_net_handle *)ctx[0];
+    int idx = (int)(intptr_t)ctx[1];
+
+    if (idx < 0 || idx >= h->num_streams) return;
+    local_stream_t *s = &h->streams[idx];
+
+    if (s->is_talker && s->info.active) {
+        send_audio_packet(h, s);
+    }
 }
 
 static void send_audio_packet(struct abus_net_handle *h, local_stream_t *s) {
@@ -520,6 +547,124 @@ static void process_beacon(struct abus_net_handle *h,
 }
 
 /* ---------------------------------------------------------------------------
+ * Stream announcement helpers
+ * --------------------------------------------------------------------------- */
+
+/**
+ * Build and send a STREAM_ANNOUNCE packet for a local talker stream.
+ * Payload: abus_net_stream_ann_t + name + per-channel labels.
+ */
+static void send_stream_announce(struct abus_net_handle *h, local_stream_t *s) {
+    uint8_t name_len = (uint8_t)strlen(s->info.name);
+
+    /* Calculate total payload size */
+    uint16_t payload_len = sizeof(abus_net_stream_ann_t) + name_len;
+    for (uint8_t ch = 0; ch < s->info.channels && ch < ABUS_NET_MAX_STREAM_CH; ch++) {
+        uint8_t lbl_len = (uint8_t)strlen(s->info.channel_labels[ch]);
+        payload_len += 1 + lbl_len;  /* label_len byte + label string */
+    }
+
+    uint8_t *payload = heap_caps_calloc(1, payload_len, MALLOC_CAP_INTERNAL);
+    if (!payload) return;
+
+    abus_net_stream_ann_t *ann = (abus_net_stream_ann_t *)payload;
+    ann->stream_id = s->info.stream_id;
+    ann->channels = s->info.channels;
+    ann->bit_depth = s->info.bit_depth;
+    ann->sample_rate = s->info.sample_rate;
+    ann->packet_interval_us = s->info.packet_interval_us;
+    ann->encoding = 0;  /* PCM */
+    ann->name_len = name_len;
+
+    uint8_t *ptr = payload + sizeof(abus_net_stream_ann_t);
+
+    /* Stream name */
+    memcpy(ptr, s->info.name, name_len);
+    ptr += name_len;
+
+    /* Channel labels */
+    for (uint8_t ch = 0; ch < s->info.channels && ch < ABUS_NET_MAX_STREAM_CH; ch++) {
+        uint8_t lbl_len = (uint8_t)strlen(s->info.channel_labels[ch]);
+        *ptr++ = lbl_len;
+        if (lbl_len > 0) {
+            memcpy(ptr, s->info.channel_labels[ch], lbl_len);
+            ptr += lbl_len;
+        }
+    }
+
+    uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+    send_raw_frame(h, disc_mac, ABUS_NET_PKT_STREAM_ANN, payload, payload_len);
+    heap_caps_free(payload);
+}
+
+/**
+ * Process a received STREAM_ANNOUNCE: find or create entry in remote_streams[],
+ * update fields, and invoke the on_stream_announced callback.
+ */
+static void process_stream_announce(struct abus_net_handle *h,
+                                     uint32_t source_uid,
+                                     const uint8_t *payload, uint16_t len) {
+    if (len < sizeof(abus_net_stream_ann_t)) return;
+
+    const abus_net_stream_ann_t *ann = (const abus_net_stream_ann_t *)payload;
+    const uint8_t *ptr = payload + sizeof(abus_net_stream_ann_t);
+    uint16_t remaining = len - sizeof(abus_net_stream_ann_t);
+
+    /* Find or create entry in remote_streams[] */
+    abus_net_stream_t *rs = NULL;
+    for (int i = 0; i < h->num_remote_streams; i++) {
+        if (h->remote_streams[i].stream_id == ann->stream_id &&
+            h->remote_streams[i].talker_uid == source_uid) {
+            rs = &h->remote_streams[i];
+            break;
+        }
+    }
+
+    bool is_new = (rs == NULL);
+    if (is_new) {
+        if (h->num_remote_streams >= (ABUS_NET_MAX_NODES * 4)) return;
+        rs = &h->remote_streams[h->num_remote_streams++];
+        memset(rs, 0, sizeof(*rs));
+    }
+
+    rs->stream_id = ann->stream_id;
+    rs->talker_uid = source_uid;
+    rs->channels = ann->channels;
+    rs->bit_depth = ann->bit_depth;
+    rs->sample_rate = ann->sample_rate;
+    rs->packet_interval_us = ann->packet_interval_us;
+    rs->active = true;
+
+    /* Parse stream name */
+    uint8_t name_len = ann->name_len;
+    if (name_len > 31) name_len = 31;
+    if (remaining >= name_len) {
+        memcpy(rs->name, ptr, name_len);
+        rs->name[name_len] = '\0';
+        ptr += ann->name_len;
+        remaining -= ann->name_len;
+    }
+
+    /* Parse channel labels */
+    for (uint8_t ch = 0; ch < ann->channels && ch < ABUS_NET_MAX_STREAM_CH; ch++) {
+        if (remaining < 1) break;
+        uint8_t lbl_len = *ptr++;
+        remaining--;
+        if (lbl_len > 15) lbl_len = 15;
+        if (remaining < lbl_len) break;
+        memcpy(rs->channel_labels[ch], ptr, lbl_len);
+        rs->channel_labels[ch][lbl_len] = '\0';
+        ptr += lbl_len;
+        remaining -= lbl_len;
+    }
+
+    /* Invoke callback */
+    if (h->config.on_stream_announced) {
+        h->config.on_stream_announced(rs, h->config.cb_ctx);
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * RX dispatch — route incoming frames to the right handler
  * --------------------------------------------------------------------------- */
 
@@ -549,6 +694,7 @@ static void rx_task(void *arg) {
         }
 
         h->stats.pkts_rx++;
+        h->last_rx_frame_time = esp_timer_get_time();
 
         const abus_net_header_t *hdr = (const abus_net_header_t *)(msg->data + 14);
         const uint8_t *payload = msg->data + 14 + ABUS_NET_HEADER_LEN;
@@ -624,7 +770,7 @@ static void rx_task(void *arg) {
                 break;
 
             case ABUS_NET_PKT_STREAM_ANN:
-                /* TODO: process stream announcement, update remote_streams */
+                process_stream_announce(h, source_uid, payload, payload_len);
                 break;
 
             case ABUS_NET_PKT_PING: {
@@ -692,17 +838,9 @@ static void beacon_task(void *arg) {
             }
         }
 
-        /* Send audio packets for all talker streams */
-        xSemaphoreTake(h->stream_lock, portMAX_DELAY);
-        for (int i = 0; i < h->num_streams; i++) {
-            if (h->streams[i].is_talker && h->streams[i].info.active) {
-                send_audio_packet(h, &h->streams[i]);
-            }
-        }
-        xSemaphoreGive(h->stream_lock);
-
-        /* Sleep for the shortest stream interval (minimum 125µs) */
-        vTaskDelay(pdMS_TO_TICKS(1));  /* TODO: use esp_timer for sub-ms precision */
+        /* Audio TX is handled by per-stream esp_timer callbacks for sub-ms
+         * precision.  This task only handles beaconing and node expiry. */
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
     vTaskDelete(NULL);
 }
@@ -799,10 +937,9 @@ esp_err_t abus_net_init(const abus_net_config_t *config, abus_net_handle_t *out)
      * For ESP32-P4 eval boards, this is typically an IP101 or RTL8201 PHY.
      * The user may also have already initialized Ethernet for IP networking.
      *
-     * TODO: Accept an externally-provided esp_eth_handle_t so AudioBus can
-     * coexist with an existing Ethernet/IP stack on the same interface.
-     * For now, we assume Ethernet is initialized externally and we just
-     * register our RX callback filter.
+     * Ethernet is initialized externally by the application.  Call
+     * abus_net_attach_eth() after init to connect AudioBus to the
+     * existing EMAC handle — coexists with IP stack on the same port.
      */
     ESP_LOGI(TAG, "AudioBus Ethernet transport initialized: uid=0x%08lx, name=\"%s\"",
              (unsigned long)h->uid, h->config.name);
@@ -841,6 +978,14 @@ esp_err_t abus_net_start(abus_net_handle_t h) {
 esp_err_t abus_net_stop(abus_net_handle_t h) {
     if (!h) return ESP_OK;
     h->running = false;
+
+    /* Stop all audio TX timers */
+    for (int i = 0; i < h->num_streams; i++) {
+        if (h->streams[i].tx_timer) {
+            esp_timer_stop(h->streams[i].tx_timer);
+        }
+    }
+
     abus_ptp_stop(h->ptp);
     vTaskDelay(pdMS_TO_TICKS(200));
     return ESP_OK;
@@ -855,8 +1000,11 @@ esp_err_t abus_net_deinit(abus_net_handle_t h) {
     vSemaphoreDelete(h->ping_sem);  /* FIX #30 */
     vQueueDelete(h->rx_queue);
 
-    /* Free stream buffers */
+    /* Free stream buffers and delete timers */
     for (int i = 0; i < h->num_streams; i++) {
+        if (h->streams[i].tx_timer) {
+            esp_timer_delete(h->streams[i].tx_timer);
+        }
         heap_caps_free(h->streams[i].tx_buf);
         heap_caps_free(h->streams[i].rx_buf);
     }
@@ -900,13 +1048,28 @@ esp_err_t abus_net_stream_create(abus_net_handle_t h, const char *name,
     s->tx_buf = heap_caps_calloc(s->tx_buf_frames * channels, sizeof(int32_t),
                                   MALLOC_CAP_INTERNAL);
 
+    /* Set up esp_timer for periodic audio TX at the stream's packet interval */
+    s->tx_timer_ctx[0] = (void *)h;
+    s->tx_timer_ctx[1] = (void *)(intptr_t)h->num_streams;
+
     h->num_streams++;
     if (out_stream_id) *out_stream_id = s->info.stream_id;
 
     xSemaphoreGive(h->stream_lock);
 
+    /* Create and start the periodic audio TX timer */
+    esp_timer_create_args_t timer_args = {
+        .callback = audio_tx_timer_cb,
+        .arg = s->tx_timer_ctx,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "abus_audio_tx",
+    };
+    if (esp_timer_create(&timer_args, &s->tx_timer) == ESP_OK) {
+        esp_timer_start_periodic(s->tx_timer, s->info.packet_interval_us);
+    }
+
     /* Announce stream to network */
-    /* TODO: send ABUS_NET_PKT_STREAM_ANN */
+    send_stream_announce(h, s);
 
     ESP_LOGI(TAG, "Stream created: id=0x%04X, \"%s\", %dch/%dbit/%luHz, interval=%uµs",
              s->info.stream_id, name, channels, bit_depth,
@@ -935,8 +1098,9 @@ esp_err_t abus_net_stream_set_channels(abus_net_handle_t h, uint16_t stream_id,
     for (int i = 0; i < h->num_streams; i++) {
         if (h->streams[i].info.stream_id == stream_id) {
             h->streams[i].info.channels = new_count;
-            /* TODO: re-announce stream */
-            break;
+            xSemaphoreGive(h->stream_lock);
+            send_stream_announce(h, &h->streams[i]);
+            return ESP_OK;
         }
     }
     xSemaphoreGive(h->stream_lock);
@@ -969,7 +1133,40 @@ int abus_net_stream_write(abus_net_handle_t h, uint16_t stream_id,
 }
 
 esp_err_t abus_net_stream_destroy(abus_net_handle_t h, uint16_t stream_id) {
-    /* TODO: send STREAM_DEL, clean up */
+    ESP_RETURN_ON_FALSE(h, ESP_ERR_INVALID_ARG, TAG, "null");
+
+    /* Send STREAM_DELETE packet: payload is just the 2-byte stream_id */
+    uint8_t del_payload[2];
+    del_payload[0] = (stream_id >> 8) & 0xFF;
+    del_payload[1] = stream_id & 0xFF;
+    uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+    send_raw_frame(h, disc_mac, ABUS_NET_PKT_STREAM_DEL, del_payload, 2);
+
+    /* Find and clean up the local stream entry */
+    xSemaphoreTake(h->stream_lock, portMAX_DELAY);
+    for (int i = 0; i < h->num_streams; i++) {
+        if (h->streams[i].info.stream_id == stream_id) {
+            /* Stop and delete the TX timer if present */
+            if (h->streams[i].tx_timer) {
+                esp_timer_stop(h->streams[i].tx_timer);
+                esp_timer_delete(h->streams[i].tx_timer);
+                h->streams[i].tx_timer = NULL;
+            }
+
+            /* Free buffers */
+            heap_caps_free(h->streams[i].tx_buf);
+            heap_caps_free(h->streams[i].rx_buf);
+
+            /* Compact the array: move last entry into this slot */
+            h->streams[i] = h->streams[--h->num_streams];
+            memset(&h->streams[h->num_streams], 0, sizeof(local_stream_t));
+
+            ESP_LOGI(TAG, "Stream 0x%04X destroyed", stream_id);
+            break;
+        }
+    }
+    xSemaphoreGive(h->stream_lock);
+
     return ESP_OK;
 }
 
@@ -1003,8 +1200,28 @@ esp_err_t abus_net_subscribe(abus_net_handle_t h, uint32_t talker_uid,
     h->num_streams++;
     xSemaphoreGive(h->stream_lock);
 
-    /* Send subscription to talker */
-    /* TODO: send ABUS_NET_PKT_SUBSCRIBE */
+    /* Send SUBSCRIBE packet to the talker */
+    {
+        uint8_t mask_len = (channel_mask != 0) ? 8 : 0;
+        uint16_t sub_len = sizeof(abus_net_subscribe_t) + mask_len;
+        uint8_t *sub_buf = heap_caps_calloc(1, sub_len, MALLOC_CAP_INTERNAL);
+        if (sub_buf) {
+            abus_net_subscribe_t *sub = (abus_net_subscribe_t *)sub_buf;
+            sub->stream_id = stream_id;
+            sub->talker_uid = talker_uid;
+            sub->channel_mask_len = mask_len;
+            if (mask_len > 0) {
+                /* Write channel bitmask in big-endian byte order */
+                uint8_t *mask_ptr = sub_buf + sizeof(abus_net_subscribe_t);
+                for (int b = 7; b >= 0; b--) {
+                    mask_ptr[7 - b] = (channel_mask >> (b * 8)) & 0xFF;
+                }
+            }
+            uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+            send_raw_frame(h, disc_mac, ABUS_NET_PKT_SUBSCRIBE, sub_buf, sub_len);
+            heap_caps_free(sub_buf);
+        }
+    }
 
     ESP_LOGI(TAG, "Subscribed to stream 0x%04X from node 0x%08lx",
              stream_id, (unsigned long)talker_uid);
@@ -1013,7 +1230,40 @@ esp_err_t abus_net_subscribe(abus_net_handle_t h, uint32_t talker_uid,
 
 esp_err_t abus_net_unsubscribe(abus_net_handle_t h, uint32_t talker_uid,
                                 uint16_t stream_id) {
-    /* TODO: send UNSUBSCRIBE, remove local stream */
+    ESP_RETURN_ON_FALSE(h, ESP_ERR_INVALID_ARG, TAG, "null");
+
+    /* Send UNSUBSCRIBE packet (same format as SUBSCRIBE, zero mask = all) */
+    abus_net_subscribe_t unsub;
+    memset(&unsub, 0, sizeof(unsub));
+    unsub.stream_id = stream_id;
+    unsub.talker_uid = talker_uid;
+    unsub.channel_mask_len = 0;
+
+    uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+    send_raw_frame(h, disc_mac, ABUS_NET_PKT_UNSUBSCRIBE,
+                   (const uint8_t *)&unsub, sizeof(unsub));
+
+    /* Find and deactivate the local listener stream */
+    xSemaphoreTake(h->stream_lock, portMAX_DELAY);
+    for (int i = 0; i < h->num_streams; i++) {
+        if (!h->streams[i].is_talker &&
+            h->streams[i].info.stream_id == stream_id &&
+            h->streams[i].info.talker_uid == talker_uid) {
+
+            /* Free RX buffer */
+            heap_caps_free(h->streams[i].rx_buf);
+
+            /* Compact the array */
+            h->streams[i] = h->streams[--h->num_streams];
+            memset(&h->streams[h->num_streams], 0, sizeof(local_stream_t));
+
+            ESP_LOGI(TAG, "Unsubscribed from stream 0x%04X (talker 0x%08lx)",
+                     stream_id, (unsigned long)talker_uid);
+            break;
+        }
+    }
+    xSemaphoreGive(h->stream_lock);
+
     return ESP_OK;
 }
 
@@ -1181,16 +1431,83 @@ esp_err_t abus_net_i2c_xfer(abus_net_handle_t h, uint32_t target_uid,
  * Public API: Metadata
  * --------------------------------------------------------------------------- */
 
+/**
+ * Store a metadata key-value pair locally and broadcast it on the network.
+ * Node-level metadata uses stream_id = 0.
+ */
+static esp_err_t metadata_store_and_send(struct abus_net_handle *h,
+                                          uint16_t stream_id,
+                                          const char *key, const char *value) {
+    if (!key || !value) return ESP_ERR_INVALID_ARG;
+
+    uint8_t key_len = (uint8_t)strlen(key);
+    uint16_t val_len = (uint16_t)strlen(value);
+    if (key_len == 0 || key_len > 31) return ESP_ERR_INVALID_ARG;
+    if (val_len > 63) val_len = 63;
+
+    /* Find existing entry or allocate a new slot */
+    int slot = -1;
+    for (int i = 0; i < h->num_metadata; i++) {
+        if (h->metadata[i].used &&
+            h->metadata[i].stream_id == stream_id &&
+            strcmp(h->metadata[i].key, key) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        /* Look for an unused slot */
+        for (int i = 0; i < 16; i++) {
+            if (!h->metadata[i].used) {
+                slot = i;
+                if (i >= h->num_metadata) h->num_metadata = i + 1;
+                break;
+            }
+        }
+    }
+    if (slot < 0) return ESP_ERR_NO_MEM;  /* Table full */
+
+    h->metadata[slot].used = true;
+    h->metadata[slot].stream_id = stream_id;
+    strncpy(h->metadata[slot].key, key, sizeof(h->metadata[slot].key) - 1);
+    h->metadata[slot].key[sizeof(h->metadata[slot].key) - 1] = '\0';
+    strncpy(h->metadata[slot].value, value, sizeof(h->metadata[slot].value) - 1);
+    h->metadata[slot].value[sizeof(h->metadata[slot].value) - 1] = '\0';
+
+    /* Build and send metadata packet:
+     * [abus_net_metadata_t header][key_len(1)][val_len(2)][key][value] */
+    uint16_t payload_len = sizeof(abus_net_metadata_t) + 1 + 2 + key_len + val_len;
+    uint8_t *payload = heap_caps_calloc(1, payload_len, MALLOC_CAP_INTERNAL);
+    if (!payload) return ESP_ERR_NO_MEM;
+
+    abus_net_metadata_t *md = (abus_net_metadata_t *)payload;
+    md->stream_id = stream_id;
+    md->num_entries = 1;
+
+    uint8_t *ptr = payload + sizeof(abus_net_metadata_t);
+    *ptr++ = key_len;
+    *ptr++ = (val_len >> 8) & 0xFF;
+    *ptr++ = val_len & 0xFF;
+    memcpy(ptr, key, key_len);
+    ptr += key_len;
+    memcpy(ptr, value, val_len);
+
+    uint8_t disc_mac[] = ABUS_ETH_MCAST_DISCOVERY;
+    esp_err_t ret = send_raw_frame(h, disc_mac, ABUS_NET_PKT_METADATA,
+                                    payload, payload_len);
+    heap_caps_free(payload);
+    return ret;
+}
+
 esp_err_t abus_net_set_metadata(abus_net_handle_t h, const char *key, const char *value) {
-    /* TODO: store locally and broadcast metadata packet */
-    (void)h; (void)key; (void)value;
-    return ESP_OK;
+    ESP_RETURN_ON_FALSE(h && key && value, ESP_ERR_INVALID_ARG, TAG, "null");
+    return metadata_store_and_send(h, 0, key, value);
 }
 
 esp_err_t abus_net_stream_set_metadata(abus_net_handle_t h, uint16_t stream_id,
                                         const char *key, const char *value) {
-    (void)h; (void)stream_id; (void)key; (void)value;
-    return ESP_OK;
+    ESP_RETURN_ON_FALSE(h && key && value, ESP_ERR_INVALID_ARG, TAG, "null");
+    return metadata_store_and_send(h, stream_id, key, value);
 }
 
 /* ---------------------------------------------------------------------------

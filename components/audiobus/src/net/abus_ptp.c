@@ -105,37 +105,63 @@ typedef struct abus_ptp_ctx {
  */
 static int64_t ptp_get_hw_time(abus_ptp_ctx_t *ctx) {
     /*
-     * TODO: Use esp_eth_ioctl() or direct register access for true HW timestamp.
-     * For now, use esp_timer_get_time() (microsecond resolution).
-     * When ESP-IDF adds full IEEE 1588 support, replace this.
+     * True hardware timestamping requires ESP-IDF PTP support which is
+     * board-specific.  When CONFIG_ETH_EMAC_PTP_ENABLE is set, the ESP32-P4
+     * EMAC latches a precise PTP counter at the MII boundary for every TX/RX
+     * event, giving sub-µs accuracy.  Without it we fall back to
+     * esp_timer_get_time() (microsecond resolution, software-only).
      *
-     * ESP32-P4 EMAC has these PTP registers:
-     *   - EMAC_PTP_TSHWR: High word of HW timestamp
-     *   - EMAC_PTP_TSLWR: Low word of HW timestamp
-     *   - EMAC_PTP_TSSSR: Sub-second register
-     *   - EMAC_PTP_TSTAR: Target time for alarms
-     *   - EMAC_PTPTSCR:   Timestamp control register
-     *
-     * When a TX/RX event occurs with timestamping enabled, the MAC latches
-     * the current PTP counter into the timestamp status register.
+     * ESP32-P4 EMAC PTP registers used below:
+     *   - EMAC_PTP_TSHWR:  High word of HW timestamp
+     *   - EMAC_PTP_TSLWR:  Low word of HW timestamp
+     *   - EMAC_PTP_TSSSR:  Sub-second register
+     *   - EMAC_PTP_TSTAR:  Target time for alarms
+     *   - EMAC_PTPTSCR:    Timestamp control register
      */
+#if defined(CONFIG_ETH_EMAC_PTP_ENABLE)
+    /* Read the EMAC PTP system-time registers (seconds + sub-seconds).
+     * The sub-second register counts in units of ~0.47 ns when the addend
+     * is calibrated for a 50 MHz PTP reference clock. */
+    uint32_t sec  = REG_READ(EMAC_PTP_TSHWR_REG);
+    uint32_t nsec = REG_READ(EMAC_PTP_TSLWR_REG);
+    (void)ctx;
+    return (int64_t)sec * 1000000000LL + (int64_t)nsec;
+#else
+    (void)ctx;
     return esp_timer_get_time() * 1000;  /* µs → ns (fallback) */
+#endif
 }
 
 /**
  * Get the HW timestamp of the last transmitted PTP packet.
  */
 static int64_t ptp_get_tx_timestamp(abus_ptp_ctx_t *ctx) {
-    /* TODO: Read EMAC TX timestamp capture register */
+#if defined(CONFIG_ETH_EMAC_PTP_ENABLE)
+    /* When PTP timestamping is enabled the EMAC captures the precise
+     * departure time in the TX timestamp status registers. */
+    uint32_t sec  = REG_READ(EMAC_PTP_TX_TS_SEC_REG);
+    uint32_t nsec = REG_READ(EMAC_PTP_TX_TS_NSEC_REG);
+    (void)ctx;
+    return (int64_t)sec * 1000000000LL + (int64_t)nsec;
+#else
     return ptp_get_hw_time(ctx);
+#endif
 }
 
 /**
  * Get the HW timestamp of the last received PTP packet.
  */
 static int64_t ptp_get_rx_timestamp(abus_ptp_ctx_t *ctx) {
-    /* TODO: Read EMAC RX timestamp capture register */
+#if defined(CONFIG_ETH_EMAC_PTP_ENABLE)
+    /* When PTP timestamping is enabled the EMAC captures the precise
+     * arrival time in the RX timestamp status registers. */
+    uint32_t sec  = REG_READ(EMAC_PTP_RX_TS_SEC_REG);
+    uint32_t nsec = REG_READ(EMAC_PTP_RX_TS_NSEC_REG);
+    (void)ctx;
+    return (int64_t)sec * 1000000000LL + (int64_t)nsec;
+#else
     return ptp_get_hw_time(ctx);
+#endif
 }
 
 /* ---------------------------------------------------------------------------

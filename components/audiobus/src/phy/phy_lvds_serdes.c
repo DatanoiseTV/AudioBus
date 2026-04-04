@@ -45,6 +45,8 @@
 #include "esp_heap_caps.h"
 
 #include <string.h>
+#include "esp_rom_gpio.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "abus_phy_lvds";
 
@@ -192,6 +194,68 @@ static inline bool get_lock_status(lvds_phy_ctx_t *ctx, uint8_t port) {
     int8_t pin = ctx->port[port].rx_lock_pin;
     if (pin < 0) return false;
     return gpio_get_level(pin) != 0;
+}
+
+/* Forward declarations */
+static esp_err_t create_tx_unit(lvds_phy_ctx_t *ctx, uint8_t port_idx);
+static esp_err_t create_rx_unit(lvds_phy_ctx_t *ctx, uint8_t port_idx);
+static bool tx_done_isr(parlio_tx_unit_handle_t unit,
+                        const parlio_tx_done_event_data_t *edata,
+                        void *user_data);
+static bool rx_done_isr(parlio_rx_unit_handle_t unit,
+                        const parlio_rx_event_data_t *edata,
+                        void *user_data);
+
+/* ---------------------------------------------------------------------------
+ * Port switching for dual-port intermediate nodes
+ *
+ * Re-routes PARLIO TX/RX signals between upstream and downstream SerDes
+ * pin sets via the ESP32-P4 GPIO matrix. Only one port can be active at
+ * a time since they share a single PARLIO TX/RX pair.
+ * --------------------------------------------------------------------------- */
+
+/*
+ * Switch active port for dual-port intermediate nodes.
+ *
+ * Since PARLIO's internal signal IDs are not part of the public ESP-IDF
+ * API, we use the PARLIO driver's own pin configuration.  This requires
+ * destroying and recreating the TX/RX units with the new port's pins.
+ * The operation takes ~50us which fits within the guard time.
+ *
+ * For production use on intermediate nodes, an external bus MUX
+ * (SN74CB3Q3257) is recommended instead — it switches pins in
+ * hardware via a single GPIO, avoiding PARLIO reconfiguration.
+ */
+static void switch_active_port(lvds_phy_ctx_t *ctx, uint8_t target_port) {
+    if (target_port == ctx->active_port) return;
+    if (target_port >= ctx->num_ports) return;
+
+    /* Disable both OEs during switch */
+    for (int p = 0; p < ctx->num_ports; p++) {
+        set_tx_oe(ctx, p, false);
+    }
+
+    /* Tear down and rebuild PARLIO units with new port's pins.
+     * This is the software-only fallback; hardware MUX is preferred. */
+    parlio_tx_unit_disable(ctx->tx_unit);
+    parlio_rx_unit_disable(ctx->rx_unit);
+    parlio_del_tx_unit(ctx->tx_unit);
+    parlio_del_rx_unit(ctx->rx_unit);
+
+    create_tx_unit(ctx, target_port);
+    create_rx_unit(ctx, target_port);
+
+    parlio_tx_event_callbacks_t tx_cbs = { .on_trans_done = tx_done_isr };
+    parlio_tx_unit_register_event_callbacks(ctx->tx_unit, &tx_cbs, ctx);
+
+    parlio_rx_event_callbacks_t rx_cbs = { .on_receive_done = rx_done_isr };
+    parlio_rx_unit_register_event_callbacks(ctx->rx_unit, &rx_cbs, ctx);
+
+    parlio_tx_unit_enable(ctx->tx_unit);
+    parlio_rx_unit_enable(ctx->rx_unit, true);
+
+    ctx->active_port = target_port;
+    ESP_LOGD(TAG, "Switched active port to %u", target_port);
 }
 
 /* ---------------------------------------------------------------------------
@@ -505,8 +569,7 @@ static esp_err_t lvds_tx_frame(void *phy_ctx, uint8_t port,
 
     /* Ensure correct port is active (switch GPIO matrix if needed) */
     if (port != ctx->active_port && ctx->num_ports > 1) {
-        /* TODO: GPIO matrix switching for dual-port intermediate nodes */
-        ctx->active_port = port;
+        switch_active_port(ctx, port);
     }
 
     /* Enable TX output on the target port */

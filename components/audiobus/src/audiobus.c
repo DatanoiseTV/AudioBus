@@ -515,18 +515,71 @@ esp_err_t abus_start(abus_handle_t handle) {
     ESP_RETURN_ON_ERROR(ret, TAG, "PHY start failed");
 
     if (h->config.role == ABUS_ROLE_MASTER) {
-        /* For now, use a default slot map with the master's own config.
-         * Full discovery will populate this properly. */
+        /* Master node is always node 0 */
         h->nodes[0].node_id = 0;
         h->nodes[0].max_dn_channels = 2;
         h->nodes[0].max_up_channels = 2;
         h->node_count = 1;
 
+        /* --- LVDS discovery: probe for downstream nodes --- */
+        h->state = ABUS_STATE_DISCOVERY;
+        ESP_LOGI(TAG, "Starting LVDS discovery...");
+
+        uint8_t beacon_buf[64];
+        uint8_t resp_slot_idx;
+
+        for (uint8_t nid = 1; nid < ABUS_MAX_NODES; nid++) {
+            /* Build and send a discovery beacon for this node_id */
+            int blen = abus_discovery_pack_beacon(beacon_buf, sizeof(beacon_buf), nid);
+            if (blen < 0) break;
+
+            h->phy.ops->tx_frame(h->phy.ctx, 0, beacon_buf, blen);
+
+            /* Wait for a discovery response with 50ms timeout */
+            bool got_response = false;
+            if (xQueueReceive(h->rx_queue, &resp_slot_idx, pdMS_TO_TICKS(50)) == pdTRUE) {
+                rx_frame_slot_t *slot = &rx_pool[resp_slot_idx];
+                abus_node_descriptor_t desc;
+                if (abus_discovery_unpack(slot->data, slot->len, &desc) == 0 &&
+                    slot->data[0] == 0x02 /* DISC_SUBTYPE_RESPONSE */) {
+                    desc.node_id = nid;
+                    h->nodes[nid] = desc;
+                    h->node_count = nid + 1;
+                    got_response = true;
+                    ESP_LOGI(TAG, "Discovered node %u: hw_type=%u, dn_ch=%u, up_ch=%u, uid=0x%08lx",
+                             nid, desc.hw_type, desc.max_dn_channels,
+                             desc.max_up_channels, (unsigned long)desc.uid);
+                }
+                /* Release slot back to pool */
+                __atomic_store_n(&rx_pool_read,
+                                 (resp_slot_idx + 1) % RX_POOL_COUNT, __ATOMIC_RELEASE);
+            }
+
+            if (!got_response) {
+                ESP_LOGI(TAG, "No response for node %u — end of chain", nid);
+                break;  /* No more nodes in the chain */
+            }
+        }
+
+        ESP_LOGI(TAG, "Discovery complete: %u node(s) found", h->node_count);
+
+        /* Compute slot map with all discovered nodes */
         abus_slotmap_compute(h->nodes, h->node_count,
                              h->config.sample_rate, h->config.bit_depth,
                              &h->slotmap);
 
-        h->state = ABUS_STATE_RUNNING;  /* TODO: proper discovery first */
+        /* Send config frame to all slave nodes */
+        if (h->node_count > 1) {
+            uint8_t config_buf[2 + sizeof(abus_slotmap_t)];
+            int clen = abus_discovery_pack_config(config_buf, sizeof(config_buf),
+                                                   &h->slotmap);
+            if (clen > 0) {
+                h->phy.ops->tx_frame(h->phy.ctx, 0, config_buf, clen);
+                ESP_LOGI(TAG, "Sent slot map config to %u slave(s)", h->node_count - 1);
+            }
+        }
+
+        h->state = ABUS_STATE_RUNNING;
     } else {
         h->state = ABUS_STATE_DISCOVERY;
     }

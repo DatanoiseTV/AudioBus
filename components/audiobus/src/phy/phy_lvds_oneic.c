@@ -43,6 +43,7 @@
 #include "esp_heap_caps.h"
 
 #include <string.h>
+#include "esp_timer.h"
 
 static const char *TAG = "abus_phy_1ic";
 
@@ -57,6 +58,7 @@ extern void     abus_8b10b_encoder_init(abus_8b10b_encoder_t *enc);
 extern uint16_t abus_8b10b_encode_data(abus_8b10b_encoder_t *enc, uint8_t byte);
 extern uint16_t abus_8b10b_encode_k(abus_8b10b_encoder_t *enc, uint8_t k_byte);
 extern void     abus_8b10b_decoder_init(abus_8b10b_decoder_t *dec);
+extern abus_symbol_t abus_8b10b_decode(abus_8b10b_decoder_t *dec, uint16_t raw10);
 
 /* ---------------------------------------------------------------------------
  * Constants
@@ -141,6 +143,10 @@ typedef struct {
     uint32_t            frames_tx;
     uint32_t            frames_rx;
     uint32_t            sync_losses;
+
+    /* Link status tracking */
+    int64_t             last_frame_time_us;
+    uint32_t            frame_period_us;    /* Expected frame period in microseconds */
 
     /* Software PLL state (slave only) */
     int32_t             clock_offset_ppb;
@@ -244,31 +250,51 @@ static int decode_bitstream_to_frame(oneic_phy_ctx_t *ctx,
         return -1;  /* No comma found */
     }
 
-    /* Decode symbols from the comma position */
+    /* Decode symbols from the comma position using 8b10b decoder */
+    abus_8b10b_decoder_init(&ctx->decoder);
     int sym_pos = comma_pos;
     int out_idx = 0;
     bool found_sof = false;
+    bool found_k28_5 = false;
 
     while (sym_pos + 10 <= total_bits && out_idx < ABUS_FRAME_BYTES_MAX) {
         uint16_t sym10 = unpack_symbol_from_bits(in_bits, sym_pos);
         sym_pos += 10;
 
-        /* Check for K-characters */
-        bool is_k = (sym10 == COMMA_PATTERN_POS || sym10 == COMMA_PATTERN_NEG);
+        abus_symbol_t decoded = abus_8b10b_decode(&ctx->decoder, sym10);
 
-        if (is_k && !found_sof) {
-            /* Skip commas until we find SOF (K28.1 follows K28.5) */
-            /* TODO: proper K-character decode. For now, mark SOF found. */
-            found_sof = true;
-            out_frame[out_idx++] = K28_5;
+        if (decoded.error) {
+            continue;  /* Skip symbols with decode errors */
+        }
+
+        if (decoded.is_k) {
+            uint8_t kval = decoded.symbol & 0xFF;
+
+            if (kval == K29_7) {
+                break;  /* EOF — stop decoding */
+            }
+
+            if (kval == K28_5) {
+                found_k28_5 = true;
+                continue;
+            }
+
+            if (kval == K28_1 && found_k28_5) {
+                /* K28.5 + K28.1 = SOF pair — begin collecting data */
+                found_sof = true;
+                found_k28_5 = false;
+                continue;
+            }
+
+            /* Other K-characters (K28.3 idle, etc.) — skip */
+            found_k28_5 = false;
             continue;
         }
 
+        /* D-character (data symbol) */
+        found_k28_5 = false;
         if (found_sof) {
-            /* Decode data symbols — use the 8b10b decode tables */
-            /* Simplified: use the codec's bulk decode on the 10-bit value */
-            /* For a proper implementation, use abus_8b10b_decode() per symbol */
-            out_frame[out_idx++] = sym10 & 0xFF;  /* Placeholder — needs proper decode */
+            out_frame[out_idx++] = decoded.symbol & 0xFF;
         }
     }
 
@@ -298,6 +324,9 @@ static bool IRAM_ATTR rx_done_cb(parlio_rx_unit_handle_t unit,
                                   void *user_data) {
     oneic_phy_ctx_t *ctx = (oneic_phy_ctx_t *)user_data;
     if (!ctx->rx_frame_cb || !edata->data) return false;
+
+    /* Record frame reception time for link status */
+    ctx->last_frame_time_us = esp_timer_get_time();
 
     /* Pass raw bitstream to callback for task-level decoding */
     ctx->rx_frame_cb(0, (const uint8_t *)edata->data,
@@ -506,10 +535,14 @@ static esp_err_t oneic_set_rx_cb(void *phy_ctx, uint8_t port,
 }
 
 static bool oneic_link_status(void *phy_ctx, uint8_t port) {
-    /* For single-chip approach, link detection uses frame reception:
-     * if we've received a valid frame recently, link is up. */
+    /* Link is considered up if a valid frame arrived within 3 beacon intervals
+     * (3 seconds).  This replaces the old `frames_rx > 0` check which would
+     * never report link-down once any frame was ever received. */
     oneic_phy_ctx_t *ctx = (oneic_phy_ctx_t *)phy_ctx;
-    return ctx->frames_rx > 0;  /* Simplified — production would use a timeout */
+    if (ctx->frames_rx == 0) return false;
+    int64_t now = esp_timer_get_time();
+    int64_t timeout_us = 3 * 1000 * 1000;  /* 3 seconds (3x beacon interval) */
+    return (now - ctx->last_frame_time_us) < timeout_us;
 }
 
 static esp_err_t oneic_set_direction(void *phy_ctx, uint8_t port, bool tx) {
@@ -567,6 +600,8 @@ esp_err_t abus_phy_oneic_create(const void *pin_config, abus_sample_rate_t sr,
         ctx->bitclk_hz = ABUS_BITCLK_44K;
     }
     ctx->symbols_per_frame = (sr <= ABUS_SR_48000) ? 1024 : 512;
+    /* Frame period: 1/Fs in microseconds (e.g. 48kHz → ~20.83 us) */
+    ctx->frame_period_us = 1000000 / (uint32_t)sr;
 
     ctx->port[0].data_pin = pins->upstream_data;
     ctx->port[0].clk_pin  = pins->upstream_clk;
